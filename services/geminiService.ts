@@ -1,6 +1,6 @@
 import { GoogleGenAI, Type, Tool } from "@google/genai";
 import { Lead, PricingItem } from "../types";
-import { generateProposalWithGemini } from "./openaiService";
+import { generateArtifactWithGemini } from "./openaiService";
 import { getLeads, getNewsForCompany } from "./dataService";
 
 // --- Mock Pricing Data ---
@@ -80,13 +80,12 @@ async function searchKnowledgeBase(args: { query: string }): Promise<{ documents
   console.log(`[Tool] Searching Knowledge Base (Drive) for: ${args.query}`);
   const q = args.query.toLowerCase();
   
-  // Simple keyword matching simulation
   const results = MOCK_KNOWLEDGE_BASE.filter(doc => 
     doc.content.toLowerCase().includes(q) || doc.name.toLowerCase().includes(q)
   ).map(doc => ({
     name: doc.name,
     link: doc.link,
-    snippet: doc.content // In a real RAG, this would be a relevant chunk
+    snippet: doc.content
   }));
 
   if (results.length === 0) {
@@ -95,24 +94,53 @@ async function searchKnowledgeBase(args: { query: string }): Promise<{ documents
   return { documents: results };
 }
 
-// THIS TOOL DELEGATES TO SPECIALIZED GEMINI AGENT
-async function draftProposal(args: { companyName: string, instructions: string }): Promise<string> {
-    console.log(`[Tool] Delegating proposal drafting to Agent for: ${args.companyName}`);
-    
-    // 1. Get Context from Data Service
-    const leads = getLeads();
-    const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase()));
-    if (!lead) return "Error: Lead not found in CRM. Cannot draft proposal.";
+// --- GENERATION TOOLS ---
 
-    // 2. Call Specialized Service (Returns JSON String)
-    const jsonContent = await generateProposalWithGemini(
-        lead.companyName,
-        lead.industry,
-        lead.needs,
+async function draftProposal(args: { companyName: string, instructions: string }): Promise<string> {
+    const leads = getLeads();
+    const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName, industry: 'Technology', needs: ['General Services'] } as Lead;
+    
+    const jsonContent = await generateArtifactWithGemini(
+        'proposal',
+        { companyName: lead.companyName, industry: lead.industry, needs: lead.needs },
         args.instructions
     );
+    return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
+}
 
-    // 3. Wrap in Artifact Tags for UI - USING SPECIFIC TAGS FOR JSON
+async function draftHandoff(args: { companyName: string, targetTeam: string, instructions: string }): Promise<string> {
+    const leads = getLeads();
+    const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName } as Lead;
+
+    const jsonContent = await generateArtifactWithGemini(
+        'handoff',
+        { companyName: lead.companyName, targetTeam: args.targetTeam },
+        args.instructions
+    );
+    return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
+}
+
+async function prepareMeetingBrief(args: { companyName: string, instructions: string }): Promise<string> {
+    const leads = getLeads();
+    const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName } as Lead;
+
+    const jsonContent = await generateArtifactWithGemini(
+        'meeting_brief',
+        { companyName: lead.companyName },
+        args.instructions
+    );
+    return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
+}
+
+async function draftFollowUp(args: { companyName: string, meetingContext: string, instructions: string }): Promise<string> {
+    const leads = getLeads();
+    const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName } as Lead;
+
+    const jsonContent = await generateArtifactWithGemini(
+        'email',
+        { companyName: lead.companyName, meetingContext: args.meetingContext },
+        args.instructions
+    );
     return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
 }
 
@@ -124,68 +152,76 @@ const tools: Tool[] = [
       {
         name: "getLeadDetails",
         description: "Retrieve details about a sales lead or customer from the CRM CSV data.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            companyName: { type: Type.STRING, description: "The name of the company." },
-          },
-          required: ["companyName"],
-        },
+        parameters: { type: Type.OBJECT, properties: { companyName: { type: Type.STRING } }, required: ["companyName"] }
       },
       {
         name: "getCompanyNews",
-        description: "Fetch the latest news headlines and updates for a specific company from the News Repository.",
-        parameters: {
-            type: Type.OBJECT,
-            properties: {
-                companyName: { type: Type.STRING, description: "The name of the company." }
-            },
-            required: ["companyName"]
-        }
+        description: "Fetch the latest news headlines and updates.",
+        parameters: { type: Type.OBJECT, properties: { companyName: { type: Type.STRING } }, required: ["companyName"] }
       },
       {
         name: "getPricing",
         description: "Search for product pricing.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            productKeyword: { type: Type.STRING, description: "Keywords (e.g. 'Cloud', 'Security')." },
-          },
-          required: ["productKeyword"],
-        },
+        parameters: { type: Type.OBJECT, properties: { productKeyword: { type: Type.STRING } }, required: ["productKeyword"] }
       },
       {
         name: "getLegalClause",
         description: "Fetch legal terms.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            industry: { type: Type.STRING, description: "The industry (e.g., 'Finance')." },
-          },
-          required: ["industry"],
-        },
+        parameters: { type: Type.OBJECT, properties: { industry: { type: Type.STRING } }, required: ["industry"] }
       },
       {
         name: "searchKnowledgeBase",
         description: "Search Google Drive for past proposals and docs.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            query: { type: Type.STRING, description: "The search query." },
-          },
-          required: ["query"],
-        },
+        parameters: { type: Type.OBJECT, properties: { query: { type: Type.STRING } }, required: ["query"] }
       },
       {
         name: "draftProposal",
-        description: "Triggers the specialized Proposal Generator Agent to write a full sales proposal and slide deck. Use this WHENEVER the user asks to draft, write, or create a proposal.",
+        description: "Drafts a full sales proposal (Doc + Slides) with pricing and timelines. Trigger via @Velocity draft proposal.",
         parameters: {
             type: Type.OBJECT,
             properties: {
-                companyName: { type: Type.STRING, description: "The target company name." },
-                instructions: { type: Type.STRING, description: "Any specific user instructions for the proposal." }
+                companyName: { type: Type.STRING },
+                instructions: { type: Type.STRING }
             },
             required: ["companyName", "instructions"]
+        }
+      },
+      {
+        name: "draftHandoff",
+        description: "Generates a cross-team handoff document. Trigger via @Velocity handoff.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                companyName: { type: Type.STRING },
+                targetTeam: { type: Type.STRING },
+                instructions: { type: Type.STRING }
+            },
+            required: ["companyName", "targetTeam", "instructions"]
+        }
+      },
+      {
+        name: "prepareMeetingBrief",
+        description: "Generates a pre-meeting briefing with recent interactions and talking points. Trigger via @Velocity prep meeting.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                companyName: { type: Type.STRING },
+                instructions: { type: Type.STRING }
+            },
+            required: ["companyName", "instructions"]
+        }
+      },
+      {
+        name: "draftFollowUp",
+        description: "Drafts a personalized follow-up email after a meeting. Trigger via @Velocity follow up.",
+        parameters: {
+            type: Type.OBJECT,
+            properties: {
+                companyName: { type: Type.STRING },
+                meetingContext: { type: Type.STRING },
+                instructions: { type: Type.STRING }
+            },
+            required: ["companyName", "meetingContext", "instructions"]
         }
       }
     ]
@@ -199,94 +235,57 @@ export class CopilotService {
   private modelName = "gemini-3-flash-preview"; 
 
   constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || 'dummy_key' });
   }
 
-  async refineArtifact(
-    fullContent: string,
-    selectedText: string,
-    instruction: string
-  ): Promise<string> {
-      console.log("[Copilot] Refining artifact...");
+  async refineArtifact(fullContent: string, selectedText: string, instruction: string): Promise<string> {
       const prompt = `
         You are an expert document editor.
-        
-        TASK:
-        Update the document based on the user's instruction.
-        
-        ORIGINAL DOCUMENT:
-        ${fullContent}
-        
-        USER SELECTED TEXT TO CHANGE:
-        "${selectedText}"
-        
-        USER INSTRUCTION:
-        "${instruction}"
-        
-        OUTPUT:
-        Return ONLY the full updated markdown content. Do not include any explanations or markdown code blocks (like \`\`\`markdown). Just the raw content.
+        TASK: Update the document based on the user's instruction.
+        ORIGINAL: ${fullContent}
+        SELECTED: "${selectedText}"
+        INSTRUCTION: "${instruction}"
+        OUTPUT: Return ONLY the full updated markdown content.
       `;
-
       try {
-          const response = await this.ai.models.generateContent({
-              model: this.modelName,
-              contents: prompt
-          });
+          const response = await this.ai.models.generateContent({ model: this.modelName, contents: prompt });
           return response.text || fullContent;
       } catch (e) {
-          console.error("Refinement failed", e);
-          return fullContent;
+          console.error("Refinement failed (API Error). Returning original.", e);
+          return fullContent; // Graceful degradation for refinement
       }
   }
 
-  async sendMessage(
-    history: { role: string; parts: { text: string }[] }[],
-    newMessage: string
-  ): Promise<string> {
+  async sendMessage(history: { role: string; parts: { text: string }[] }[], newMessage: string): Promise<string> {
     try {
       const model = this.ai.models;
-      
-      // Initialize contents with history and new user message
-      let contents: any[] = [
-        ...history,
-        { role: 'user', parts: [{ text: newMessage }] }
-      ];
+      let contents: any[] = [...history, { role: 'user', parts: [{ text: newMessage }] }];
 
       const config = {
         tools: tools,
-        systemInstruction: `You are the Contoso Sales Copilot (Gemini-powered Orchestrator).
+        systemInstruction: `You are Velocity, the Contoso Sales Copilot.
         
-        **Your Role:**
-        You are the main interface. You handle chat, data retrieval, and coordination.
-        However, you have a specialized colleague: **The Proposal Generator Agent**.
+        **Persona:**
+        You are an intelligent M365-style agent helping sales teams.
+        You support "Quick Commands" via the @Velocity tag.
         
-        **Rule for Proposals:**
-        If the user asks to "Draft a proposal", "Write a proposal", or "Create a document", you MUST use the \`draftProposal\` tool.
-        DO NOT write the proposal yourself in the chat. Delegate it to the agent.
+        **Capabilities & Commands:**
+        1. **Proposal Generation**: "@Velocity draft proposal [Company]" -> Use \`draftProposal\`.
+        2. **Handoffs**: "@Velocity handoff [Company] to [Team]" -> Use \`draftHandoff\`.
+        3. **Meeting Prep**: "@Velocity prep meeting [Company]" -> Use \`prepareMeetingBrief\`.
+        4. **Follow-ups**: "@Velocity follow up [Company]" -> Use \`draftFollowUp\`.
+        5. **Proactive Alerts**: You can detect "Buying Signals" and "Renewal Risks" from news and CRM data.
         
-        **Response Style:**
-        - Be witty and professional.
-        - When delegating to the Proposal Agent, say something like: "I'll put our specialist agent on that right away..." or "Spinning up the proposal engine for you..."
-        - The tool will return a JSON object wrapped in <artifact_payload> tags.
-        - **IMPORTANT:** You MUST output these <artifact_payload> tags and their content exactly as received in your final response. Do not summarize them.
-        - Say: "I've generated both a Document and a Slide Deck for you. Click the card below to view it."
-        
-        **Data Access:**
-        - Use \`getLeadDetails\` to get CRM data (simulated CSV).
-        - Use \`getCompanyNews\` to fetch recent headlines for a company to personalize interactions.
-        - Use \`searchKnowledgeBase\` for questions about *past* proposals or playbooks.
-        - Use \`getPricing\` for specific price checks.
+        **Rules:**
+        - If the user uses a @Velocity command, map it to the correct tool immediately.
+        - For any content generation (Proposal, Handoff, Email, Brief), ALWAYS use the respective tool. DO NOT write it in chat.
+        - The tools return JSON wrapped in <artifact_payload>. Output this EXACTLY.
+        - Be concise and professional.
         `
       };
 
-      // Initial generation
-      let result = await model.generateContent({
-        model: this.modelName,
-        contents: contents,
-        config: config
-      });
+      let result = await model.generateContent({ model: this.modelName, contents: contents, config: config });
 
-      // Handle Function Calls Loop (Max 5 turns)
       let turnCount = 0;
       const MAX_TURNS = 5;
 
@@ -294,62 +293,73 @@ export class CopilotService {
           turnCount++;
           const candidate = result.candidates[0];
           const functionCalls = candidate.content.parts.filter(p => p.functionCall).map(p => p.functionCall);
-
-          // IMPORTANT: Append the model's function call message to history to maintain context
           contents.push(candidate.content);
 
           const functionResponses = await Promise.all(functionCalls.map(async (call) => {
              if (!call) return null;
              console.log(`[Copilot] Calling tool: ${call.name}`);
              let response: any = {};
-             
              try {
-                 if (call.name === 'getLeadDetails') {
-                   response = await getLeadDetails(call.args as any) || { error: "Lead not found" };
-                 } else if (call.name === 'getCompanyNews') {
-                   response = { news: await getCompanyNews(call.args as any) };
-                 } else if (call.name === 'getPricing') {
-                   response = await getPricing(call.args as any) || [];
-                 } else if (call.name === 'getLegalClause') {
-                   response = { clause: await getLegalClause(call.args as any) };
-                 } else if (call.name === 'searchKnowledgeBase') {
-                   response = await searchKnowledgeBase(call.args as any);
-                 } else if (call.name === 'draftProposal') {
-                   // This calls the Gemini service via the wrapper function
-                   response = { artifact: await draftProposal(call.args as any) };
+                 switch (call.name) {
+                     case 'getLeadDetails': response = await getLeadDetails(call.args as any) || { error: "Lead not found" }; break;
+                     case 'getCompanyNews': response = { news: await getCompanyNews(call.args as any) }; break;
+                     case 'getPricing': response = await getPricing(call.args as any) || []; break;
+                     case 'getLegalClause': response = { clause: await getLegalClause(call.args as any) }; break;
+                     case 'searchKnowledgeBase': response = await searchKnowledgeBase(call.args as any); break;
+                     case 'draftProposal': response = { artifact: await draftProposal(call.args as any) }; break;
+                     case 'draftHandoff': response = { artifact: await draftHandoff(call.args as any) }; break;
+                     case 'prepareMeetingBrief': response = { artifact: await prepareMeetingBrief(call.args as any) }; break;
+                     case 'draftFollowUp': response = { artifact: await draftFollowUp(call.args as any) }; break;
                  }
              } catch (e) {
-                 console.error("Tool Execution Error", e);
                  response = { error: `Tool execution failed: ${e}` };
              }
-
-             return {
-               name: call.name,
-               response: { result: response },
-               id: call.id
-             };
+             return { name: call.name, response: { result: response }, id: call.id };
           }));
 
           const validResponses = functionResponses.filter(r => r !== null);
-          
-          // Append the function responses to history
           contents.push({ role: 'user', parts: validResponses.map(resp => ({ functionResponse: resp })) });
 
-          // Call model again with updated history
-          result = await model.generateContent({
-              model: this.modelName,
-              contents: contents,
-              config: config
-          });
+          result = await model.generateContent({ model: this.modelName, contents: contents, config: config });
       }
 
-      // After the loop, return the final text
-      return result.text || "I processed the request but the model returned no text content. Please try rephrasing.";
+      return result.text || "I processed the request but the model returned no text content.";
 
     } catch (error) {
-      console.error("Copilot Error:", error);
-      return "I encountered an error while processing your request. Please check your API key.";
+      console.error("Copilot Error (API Failure). Attempting Fallback logic.", error);
+      return await this.handleFallbackResponse(newMessage);
     }
+  }
+
+  // Handle fallback when the LLM is down but we can still infer intent via regex
+  private async handleFallbackResponse(query: string): Promise<string> {
+      const lowerQuery = query.toLowerCase();
+      const leads = getLeads();
+      // Try to find company in query
+      const lead = leads.find(l => lowerQuery.includes(l.companyName.toLowerCase())) || leads[0];
+      const companyName = lead ? lead.companyName : "Client";
+
+      let artifactResponse = "";
+      let actionTaken = "";
+
+      // Force-invoke the tool logic (which now has its own fallback templates)
+      if (lowerQuery.includes("proposal")) {
+          artifactResponse = await draftProposal({ companyName, instructions: query });
+          actionTaken = "drafting a proposal";
+      } else if (lowerQuery.includes("handoff")) {
+          artifactResponse = await draftHandoff({ companyName, targetTeam: "Implementation", instructions: query });
+          actionTaken = "creating a handoff";
+      } else if (lowerQuery.includes("brief") || lowerQuery.includes("prep") || lowerQuery.includes("meeting")) {
+          artifactResponse = await prepareMeetingBrief({ companyName, instructions: query });
+          actionTaken = "preparing a meeting brief";
+      } else if (lowerQuery.includes("email") || lowerQuery.includes("follow up")) {
+          artifactResponse = await draftFollowUp({ companyName, meetingContext: "recent discussion", instructions: query });
+          actionTaken = "drafting a follow-up email";
+      } else {
+           return "I'm currently having trouble connecting to my AI services. Please check your internet connection or API key configuration.";
+      }
+
+      return `(AI Service Unavailable) I have generated a **sample** for you by ${actionTaken} for ${companyName}.\n\n${artifactResponse}`;
   }
 }
 

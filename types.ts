@@ -29,6 +29,7 @@ export interface Message {
 
 export enum WorkspaceMode {
   DASHBOARD = 'DASHBOARD',
+  CALENDAR = 'CALENDAR',
   ARTIFACTS = 'ARTIFACTS',
   HISTORY = 'HISTORY'
 }
@@ -53,6 +54,17 @@ export interface ArtifactData {
     presentationContent: string;
 }
 
+export interface Artifact {
+    id: string;
+    title: string;
+    type: 'Proposal' | 'Handoff' | 'Meeting Brief' | 'Email' | 'Research' | 'Generic';
+    status: 'Draft' | 'In Review' | 'Finalized' | 'Sent';
+    companyName: string;
+    createdAt: Date;
+    lastModified: Date;
+    content: ArtifactData;
+}
+
 export interface DocumentComment {
     id: string;
     author: string;
@@ -70,4 +82,14 @@ export interface ActionSuggestion {
     prompt: string;
     icon: any;
     colorClass: string;
+}
+
+export interface CalendarEvent {
+    id: string;
+    title: string;
+    date: Date;
+    type: 'meeting' | 'reminder' | 'deadline';
+    leadId?: string; // Links to a CRM record
+    companyName?: string;
+    description?: string;
 }

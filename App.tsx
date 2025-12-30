@@ -5,26 +5,25 @@ import CopilotPanel from './components/CopilotPanel';
 import ArtifactViewer from './components/ArtifactViewer';
 import Analytics from './components/Analytics';
 import HistoryView from './components/HistoryView';
-import { WorkspaceMode, Lead, ArtifactData } from './types';
-import { ChevronLeft, Bot } from 'lucide-react';
+import CalendarView from './components/CalendarView';
+import { WorkspaceMode, Lead, ArtifactData, CalendarEvent } from './types';
+import { ChevronLeft, Bot, Layers } from 'lucide-react';
 import { copilotService } from './services/geminiService';
+import { createArtifact } from './services/artifactService';
+import { getLeads } from './services/dataService';
 
 const App: React.FC = () => {
-  // State for the Central Workspace
   const [mode, setMode] = useState<WorkspaceMode>(WorkspaceMode.DASHBOARD);
-  
-  // Data State
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
-  const [currentArtifact, setCurrentArtifact] = useState<ArtifactData | null>(null);
   
-  // Copilot State
+  // Controls which artifact to show in viewer (null = List View)
+  const [activeArtifactId, setActiveArtifactId] = useState<string | null>(null);
+  
   const [isCopilotOpen, setIsCopilotOpen] = useState(false);
   const [pendingPrompt, setPendingPrompt] = useState<string | undefined>(undefined);
 
-  // Handlers
   const handleSelectLead = (lead: Lead) => {
     setSelectedLead(lead);
-    // Maybe show details sidebar or just set context
   };
 
   const handleRunAction = (prompt: string, leadContext?: Lead) => {
@@ -35,44 +34,67 @@ const App: React.FC = () => {
     setIsCopilotOpen(true);
   };
 
-  const handleArtifactGenerated = (data: ArtifactData) => {
-    setCurrentArtifact(data);
-    setMode(WorkspaceMode.ARTIFACTS);
-    // NOTE: We do NOT close copilot here anymore, allowing user to continue chatting
+  // NEW: Handle Calendar Event Click
+  const handleEventClick = (event: CalendarEvent) => {
+      // 1. Try to find associated lead
+      let associatedLead = null;
+      if (event.leadId) {
+          const leads = getLeads();
+          associatedLead = leads.find(l => l.id === event.leadId) || null;
+      }
+      if (associatedLead) setSelectedLead(associatedLead);
+
+      // 2. Construct context-aware prompt
+      let prompt = `I see you selected the event "${event.title}".`;
+      
+      if (event.type === 'meeting') {
+          prompt = `Prepare a meeting brief for the "${event.title}" on ${new Date(event.date).toLocaleDateString()}.`;
+          if (associatedLead) prompt += ` It is with ${associatedLead.companyName}.`;
+      } else if (event.type === 'deadline') {
+           prompt = `Draft a renewal proposal for "${event.companyName || event.title}" before the deadline on ${new Date(event.date).toLocaleDateString()}.`;
+      } else {
+          prompt = `Help me prepare for "${event.title}".`;
+      }
+
+      setPendingPrompt(prompt);
+      setIsCopilotOpen(true);
   };
 
-  const handleRefineArtifact = async (selectedText: string, instruction: string): Promise<ArtifactData | null> => {
-      if (!currentArtifact) return null;
-      
-      const updatedDoc = await copilotService.refineArtifact(
-          currentArtifact.documentContent, 
-          selectedText, 
-          instruction
-      );
-
-      const newData = { ...currentArtifact, documentContent: updatedDoc };
-      setCurrentArtifact(newData);
-      return newData;
+  const handleArtifactGenerated = (data: ArtifactData) => {
+    // 1. Persist the new artifact using the service
+    const newArtifact = createArtifact(data, { 
+        companyName: selectedLead?.companyName || 'New Client', 
+        type: 'Generic' // Type inference happens inside createArtifact based on mapping usually, or passed explicitly if we had it
+    });
+    
+    // 2. Set as active
+    setActiveArtifactId(newArtifact.id);
+    
+    // 3. Switch view
+    setMode(WorkspaceMode.ARTIFACTS);
+    
+    // 4. UX refinement for mobile
+    if (window.innerWidth < 768) {
+        setIsCopilotOpen(false);
+    }
   };
 
   const renderCanvas = () => {
     switch (mode) {
       case WorkspaceMode.DASHBOARD:
-        return (
-          <Dashboard 
-            onSelectLead={handleSelectLead} 
-            onRunAction={handleRunAction} 
-          />
-        );
+        return <Dashboard onSelectLead={handleSelectLead} onRunAction={handleRunAction} />;
+      case WorkspaceMode.CALENDAR:
+        return <CalendarView onEventClick={handleEventClick} />;
       case WorkspaceMode.ARTIFACTS:
-        return currentArtifact ? (
-          <ArtifactViewer 
-            data={currentArtifact} 
-            onBack={() => setMode(WorkspaceMode.DASHBOARD)}
-            onRefine={handleRefineArtifact}
-          />
-        ) : (
-          <div className="flex items-center justify-center h-full text-gray-400">No content generated.</div>
+        return (
+            <ArtifactViewer 
+                initialArtifactId={activeArtifactId} 
+                onBackToDashboard={() => setMode(WorkspaceMode.DASHBOARD)}
+                onRefine={async (sel, inst) => {
+                     // The Viewer handles the API call internally via direct import now.
+                     return null; 
+                }}
+            />
         );
       case WorkspaceMode.HISTORY:
         return <HistoryView />;
@@ -83,25 +105,17 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen w-full bg-white overflow-hidden font-sans text-slate-900 relative">
-      
-      {/* 1. Left Rail: Navigation */}
       <Navigation 
         currentView={mode} 
-        onNavigate={(m) => setMode(m)} 
+        onNavigate={(m) => { setMode(m); setActiveArtifactId(null); }} 
         onToggleCopilot={() => setIsCopilotOpen(!isCopilotOpen)}
       />
 
-      {/* 2. Middle Rail: Main Canvas */}
-      <main className="flex-1 flex flex-col min-w-0 relative z-0 overflow-hidden bg-white">
+      <main className="flex-1 flex flex-col min-w-0 relative z-0 overflow-hidden bg-white mb-16 md:mb-0">
         {renderCanvas()}
       </main>
 
-      {/* 3. Copilot Overlay Drawer */}
-      <div 
-        className={`fixed inset-y-0 right-0 z-50 w-[450px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-gray-200 ${
-            isCopilotOpen ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
+      <div className={`fixed inset-y-0 right-0 z-50 w-full md:w-[450px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-gray-200 ${isCopilotOpen ? 'translate-x-0' : 'translate-x-full'}`}>
          <CopilotPanel 
             activeLead={selectedLead}
             onArtifactGenerated={handleArtifactGenerated}
@@ -111,28 +125,18 @@ const App: React.FC = () => {
          />
       </div>
 
-      {/* 4. Vertical Toggle Tab (Visible when closed) */}
       {!isCopilotOpen && (
           <button 
             onClick={() => setIsCopilotOpen(true)}
-            className="fixed right-0 top-1/2 -translate-y-1/2 bg-black text-white p-2 rounded-l-lg shadow-lg hover:bg-gray-800 transition-all z-40 flex flex-col items-center gap-2 group"
+            className="hidden md:flex fixed right-0 top-1/2 -translate-y-1/2 bg-black text-white p-2 rounded-l-lg shadow-lg hover:bg-gray-800 transition-all z-40 flex-col items-center gap-2 group"
           >
               <Bot className="w-5 h-5" />
-              <div className="writing-vertical-lr text-[10px] font-bold tracking-widest uppercase transform rotate-180 py-2">
-                  Copilot
-              </div>
+              <div className="writing-vertical-lr text-[10px] font-bold tracking-widest uppercase transform rotate-180 py-2">Copilot</div>
               <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           </button>
       )}
 
-      {/* Overlay Backdrop */}
-      {isCopilotOpen && (
-          <div 
-            className="fixed inset-0 bg-black/5 backdrop-blur-[1px] z-40" 
-            onClick={() => setIsCopilotOpen(false)}
-          />
-      )}
-
+      {isCopilotOpen && <div className="fixed inset-0 bg-black/20 backdrop-blur-[2px] z-40 md:bg-black/5 md:backdrop-blur-[1px]" onClick={() => setIsCopilotOpen(false)} />}
     </div>
   );
 };

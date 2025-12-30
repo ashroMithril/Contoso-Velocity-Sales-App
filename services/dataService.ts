@@ -1,4 +1,5 @@
-import { Lead } from '../types';
+
+import { Lead, CalendarEvent } from '../types';
 
 // ---------------------------------------------------------------------------
 // 1. CRM DATA (Simulating a CSV Export)
@@ -21,7 +22,7 @@ export const CRM_CSV_DATA: Lead[] = [
         { type: 'info', text: "Strategic review tomorrow - brief ready" },
         { type: 'warning', text: "Need to connect with VP Engineering" }
     ],
-    suggestedAction: "Review technical architecture"
+    suggestedAction: "Review sales proposal"
   },
   {
     id: "3",
@@ -73,7 +74,7 @@ export const CRM_CSV_DATA: Lead[] = [
         { type: 'positive', text: "New distribution center opening in Q2" },
         { type: 'warning', text: "Current provider contract expires soon" }
     ],
-    suggestedAction: "Send IoT tracking case study"
+    suggestedAction: "Send pricing deck"
   },
   {
     id: "6",
@@ -167,6 +168,92 @@ export const NEWS_REPOSITORY: Record<string, string[]> = {
         "Fabrikam faces lawsuit over tenant data privacy",
         "Real Estate Outlook: Fabrikam leads market in digital transformation"
     ]
+};
+
+// ---------------------------------------------------------------------------
+// 3. CALENDAR EVENTS GENERATOR
+// ---------------------------------------------------------------------------
+
+const EVENT_TEMPLATES = [
+    { title: "Quarterly Business Review", type: 'meeting', desc: "Review Q3 performance and Q4 roadmap." },
+    { title: "Introductory Call", type: 'meeting', desc: "Initial discovery and needs assessment." },
+    { title: "Solution Demo", type: 'meeting', desc: "Deep dive into product capabilities." },
+    { title: "Contract Renewal Deadline", type: 'deadline', desc: "Current MSA expires. Need renewal signed." },
+    { title: "Technical Integration Sync", type: 'meeting', desc: "Align on API requirements and security." },
+    { title: "Follow-up: Compliance", type: 'reminder', desc: "Send updated SOC2 Type II reports." },
+    { title: "Pricing Negotiation", type: 'meeting', desc: "Finalize discount structure and payment terms." },
+    { title: "Implementation Kickoff", type: 'meeting', desc: "Handover to customer success team." },
+    { title: "Stakeholder Lunch", type: 'meeting', desc: "Casual sync with key decision makers." },
+    { title: "RFP Submission Due", type: 'deadline', desc: "Submit final response packet." },
+    { title: "Internal Pipeline Review", type: 'meeting', desc: "Weekly team sync on active deals." },
+    { title: "Sign-off Meeting", type: 'meeting', desc: "Get final signatures on the contract." }
+];
+
+export const getCalendarEvents = (): CalendarEvent[] => {
+    const events: CalendarEvent[] = [];
+    const today = new Date();
+    
+    // Function to generate random events for a specific month
+    const generateForMonth = (year: number, month: number, count: number) => {
+        for (let i = 0; i < count; i++) {
+            // Pick a random day in the month
+            const day = Math.floor(Math.random() * 28) + 1; // 1-28 to be safe
+            // Pick a random hour (9am - 5pm)
+            const hour = Math.floor(Math.random() * 9) + 9; 
+            
+            const date = new Date(year, month, day, hour, 0, 0);
+            
+            // Pick a random lead to associate
+            const lead = CRM_CSV_DATA[Math.floor(Math.random() * CRM_CSV_DATA.length)];
+            // Pick a random template
+            const template = EVENT_TEMPLATES[Math.floor(Math.random() * EVENT_TEMPLATES.length)];
+
+            events.push({
+                id: `evt-${year}-${month}-${i}`,
+                title: `${template.title}: ${lead.companyName}`,
+                date: date,
+                type: template.type as any,
+                leadId: lead.id,
+                companyName: lead.companyName,
+                description: template.desc
+            });
+        }
+    };
+
+    // 1. Current Month (High Density - 15 events)
+    generateForMonth(today.getFullYear(), today.getMonth(), 15);
+
+    // 2. Next Month (Medium Density - 10 events)
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    generateForMonth(nextMonth.getFullYear(), nextMonth.getMonth(), 12);
+
+    // 3. Month After Next (Low Density - 5 events)
+    const futureMonth = new Date(today.getFullYear(), today.getMonth() + 2, 1);
+    generateForMonth(futureMonth.getFullYear(), futureMonth.getMonth(), 8);
+
+    // 4. Ensure some events are on specific "today" and "tomorrow" for demo purposes
+    events.push({
+        id: 'evt-today-1',
+        title: 'QBR with Acme Corp',
+        date: new Date(today.getFullYear(), today.getMonth(), today.getDate(), 14, 0), // Today 2pm
+        type: 'meeting',
+        companyName: 'Acme Corp',
+        leadId: '1',
+        description: 'Quarterly Business Review with executive team.'
+    });
+    
+    events.push({
+        id: 'evt-tomorrow-1',
+        title: 'Intro Call: TechStart',
+        date: new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 11, 0), // Tomorrow 11am
+        type: 'meeting',
+        companyName: 'TechStart Inc',
+        leadId: '3',
+        description: 'Initial discovery call.'
+    });
+
+    // Sort chronologically
+    return events.sort((a, b) => a.date.getTime() - b.date.getTime());
 };
 
 // Accessors

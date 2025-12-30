@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutGrid, BarChart2, History, Settings, Bot, Layers } from 'lucide-react';
+import { LayoutGrid, BarChart2, History, Settings, Bot, Layers, Calendar } from 'lucide-react';
 import { WorkspaceMode } from '../types';
 
 interface NavigationProps {
@@ -12,52 +12,76 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onNavigate, onTogg
   const NavItem = ({ mode, icon: Icon, label }: { mode: any; icon: any; label: string }) => (
     <button
       onClick={() => onNavigate(mode)}
-      className={`p-3 rounded-xl mb-4 transition-all duration-300 group relative flex justify-center w-10 h-10 items-center ${
+      className={`p-3 md:rounded-xl md:mb-4 transition-all duration-300 group relative flex justify-center items-center md:w-11 md:h-11 ${
         currentView === mode 
-          ? 'bg-black text-white shadow-lg scale-105' 
-          : 'text-gray-400 hover:bg-gray-100 hover:text-black'
+          ? 'text-black md:bg-black md:text-white md:shadow-lg md:ring-2 md:ring-black md:ring-offset-2' 
+          : 'text-gray-400 hover:text-black md:hover:bg-gray-100'
       }`}
     >
-      <Icon className="w-5 h-5" strokeWidth={currentView === mode ? 2.5 : 2} />
-      <span className="absolute left-14 bg-black text-white text-[10px] uppercase tracking-wider px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-50 pointer-events-none shadow-md">
+      <Icon className="w-6 h-6 md:w-5 md:h-5" strokeWidth={currentView === mode ? 2.5 : 2} />
+      {/* Tooltip for Desktop */}
+      <span className="hidden md:block absolute left-16 bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider px-3 py-1.5 rounded-md opacity-0 group-hover:opacity-100 transition-all whitespace-nowrap z-50 pointer-events-none shadow-xl border border-gray-700 -translate-x-2 group-hover:translate-x-0">
         {label}
+        <div className="absolute left-[-4px] top-1/2 -translate-y-1/2 w-2 h-2 bg-gray-900 rotate-45 border-l border-b border-gray-700"></div>
       </span>
+      {/* Label for Mobile (Optional, currently icon only for cleaner look) */}
     </button>
   );
 
   return (
-    <div className="w-20 bg-white border-r border-gray-100 flex flex-col items-center py-6 z-20 shrink-0 h-full">
-      <div className="mb-10">
-        <button 
-            onClick={onToggleCopilot}
-            className="w-10 h-10 bg-black rounded-xl grid place-items-center shadow-lg hover:shadow-xl transition-all cursor-pointer hover:scale-105 active:scale-95"
-            title="Toggle Copilot"
-        >
-             <Bot className="w-5 h-5 text-white" />
-        </button>
-      </div>
+    <>
+        {/* DESKTOP SIDEBAR */}
+        <div className="hidden md:flex w-[88px] bg-white border-r border-gray-200 flex-col items-center py-6 z-20 shrink-0 h-full shadow-[5px_0_20px_rgba(0,0,0,0.01)]">
+            <div className="mb-10">
+                <button 
+                    onClick={onToggleCopilot}
+                    className="w-11 h-11 bg-indigo-600 rounded-xl grid place-items-center shadow-lg hover:shadow-indigo-500/30 transition-all cursor-pointer hover:scale-105 active:scale-95 group relative"
+                    title="Toggle Copilot"
+                >
+                    <Bot className="w-5 h-5 text-white" />
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
+                </button>
+            </div>
 
-      <nav className="flex-1 w-full px-2 flex flex-col items-center">
-        <NavItem mode={WorkspaceMode.DASHBOARD} icon={LayoutGrid} label="Workspace" />
-        <NavItem mode={WorkspaceMode.ARTIFACTS} icon={Layers} label="Artifacts" />
-        <NavItem mode={WorkspaceMode.HISTORY} icon={History} label="History" />
-        <button
-            onClick={() => {}} 
-            className="p-3 rounded-xl mb-4 text-gray-400 hover:bg-gray-100 hover:text-black transition-all flex justify-center w-10 h-10 items-center"
-        >
-            <BarChart2 className="w-5 h-5" strokeWidth={2} />
-        </button>
-      </nav>
+            <nav className="flex-1 w-full px-2 flex flex-col items-center gap-1">
+                <NavItem mode={WorkspaceMode.DASHBOARD} icon={LayoutGrid} label="Workspace" />
+                <NavItem mode={WorkspaceMode.CALENDAR} icon={Calendar} label="Calendar" />
+                <NavItem mode={WorkspaceMode.ARTIFACTS} icon={Layers} label="Artifacts" />
+                <NavItem mode={WorkspaceMode.HISTORY} icon={History} label="History" />
+                <button className="p-3 rounded-xl mb-4 text-gray-400 hover:bg-gray-100 hover:text-black transition-all flex justify-center w-11 h-11 items-center hover:shadow-sm">
+                    <BarChart2 className="w-5 h-5" strokeWidth={2} />
+                </button>
+            </nav>
 
-      <div className="mt-auto px-2 flex flex-col items-center gap-4">
-         <button className="p-2 text-gray-400 hover:text-black transition-colors">
-             <Settings className="w-5 h-5" />
-         </button>
-         <div className="mb-4 w-8 h-8 bg-gray-100 text-gray-900 rounded-full grid place-items-center text-xs font-bold border border-gray-200">
-            JD
-         </div>
-      </div>
-    </div>
+            <div className="mt-auto px-2 flex flex-col items-center gap-5">
+                <button className="p-2 text-gray-400 hover:text-black transition-colors hover:bg-gray-50 rounded-lg">
+                    <Settings className="w-5 h-5" />
+                </button>
+                <div className="mb-4 w-9 h-9 bg-gray-100 text-gray-900 rounded-full grid place-items-center text-xs font-bold border border-gray-200 ring-2 ring-white shadow-sm">
+                    JD
+                </div>
+            </div>
+        </div>
+
+        {/* MOBILE BOTTOM BAR */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-50 flex items-center justify-around pb-safe pt-3 pb-3 shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+             <NavItem mode={WorkspaceMode.DASHBOARD} icon={LayoutGrid} label="Home" />
+             <NavItem mode={WorkspaceMode.CALENDAR} icon={Calendar} label="Calendar" />
+             
+             {/* Mobile Copilot Trigger */}
+             <button 
+                onClick={onToggleCopilot}
+                className="w-12 h-12 bg-black rounded-full grid place-items-center shadow-lg text-white -mt-8 border-4 border-white"
+            >
+                <Bot className="w-6 h-6" />
+            </button>
+
+             <NavItem mode={WorkspaceMode.ARTIFACTS} icon={Layers} label="Artifacts" />
+             <button className="p-3 text-gray-400">
+                <Settings className="w-6 h-6" />
+             </button>
+        </div>
+    </>
   );
 };
 

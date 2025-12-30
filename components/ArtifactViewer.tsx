@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArtifactData, DocumentComment } from '../types';
+import { Artifact, ArtifactData, DocumentComment } from '../types';
+import { getArtifacts, saveArtifact } from '../services/artifactService';
+import { copilotService } from '../services/geminiService';
 import { 
     FileText, 
     Presentation, 
@@ -13,53 +15,109 @@ import {
     User, 
     X, 
     AtSign,
-    MessageSquare
+    MessageSquare,
+    Search,
+    Clock,
+    Filter,
+    MoreVertical,
+    File,
+    Mail,
+    Briefcase
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 interface ArtifactViewerProps {
-  data: ArtifactData;
-  onBack: () => void;
-  onRefine: (selectedText: string, instruction: string) => Promise<ArtifactData | null>;
+  initialArtifactId?: string | null;
+  onBackToDashboard: () => void;
+  onRefine: (selectedText: string, instruction: string) => Promise<string | null>;
 }
 
-const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, onBack, onRefine }) => {
-  const [viewMode, setViewMode] = useState<'doc' | 'ppt'>('doc');
+const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ initialArtifactId, onBackToDashboard, onRefine }) => {
+  // Navigation State
+  const [viewState, setViewState] = useState<'LIST' | 'DETAIL'>('LIST');
+  const [currentArtifact, setCurrentArtifact] = useState<Artifact | null>(null);
   
-  // Selection & Toolbar State
+  // List View State
+  const [artifacts, setArtifacts] = useState<Artifact[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  
+  // Detail View State (Editor)
+  const [viewMode, setViewMode] = useState<'doc' | 'ppt'>('doc');
   const [toolbarPosition, setToolbarPosition] = useState<{top: number, left: number} | null>(null);
   const [selectedText, setSelectedText] = useState('');
   const [selectionMode, setSelectionMode] = useState<'initial' | 'ai' | 'comment'>('initial');
-  
-  // Feature State
   const [instruction, setInstruction] = useState('');
   const [commentInput, setCommentInput] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const [comments, setComments] = useState<DocumentComment[]>([]);
-  const [showCommentSidebar, setShowCommentSidebar] = useState(true);
+  const [showCommentSidebar, setShowCommentSidebar] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Handle Text Selection
+  // Initialize Data
   useEffect(() => {
+    setArtifacts(getArtifacts());
+  }, [viewState]); // Refresh when switching views
+
+  // Handle Initial Load or Prop Change
+  useEffect(() => {
+    if (initialArtifactId) {
+        const found = getArtifacts().find(a => a.id === initialArtifactId);
+        if (found) {
+            setCurrentArtifact(found);
+            setViewState('DETAIL');
+        }
+    } else {
+        // Only force list if we aren't already viewing something intentionally
+        if (!initialArtifactId && viewState !== 'DETAIL') {
+             setViewState('LIST');
+        }
+    }
+  }, [initialArtifactId]);
+
+  // --- List View Logic ---
+  const filteredArtifacts = artifacts.filter(a => 
+      a.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      a.companyName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const getIconForType = (type: string) => {
+      switch(type) {
+          case 'Proposal': return <FileText className="w-5 h-5 text-indigo-600" />;
+          case 'Meeting Brief': return <Presentation className="w-5 h-5 text-orange-600" />;
+          case 'Email': return <Mail className="w-5 h-5 text-green-600" />;
+          case 'Handoff': return <Briefcase className="w-5 h-5 text-blue-600" />;
+          default: return <File className="w-5 h-5 text-gray-500" />;
+      }
+  };
+
+  const getStatusColor = (status: string) => {
+      switch(status) {
+          case 'Finalized': return 'bg-green-100 text-green-700 border-green-200';
+          case 'In Review': return 'bg-amber-100 text-amber-700 border-amber-200';
+          case 'Sent': return 'bg-blue-100 text-blue-700 border-blue-200';
+          default: return 'bg-gray-100 text-gray-600 border-gray-200';
+      }
+  };
+
+  // --- Detail View Logic (Selection & AI) ---
+  useEffect(() => {
+    if (viewState !== 'DETAIL') return;
+
     const handleSelection = () => {
         const selection = window.getSelection();
-        // If we are currently typing in an input, don't clear the toolbar
         if (document.activeElement?.tagName === 'INPUT') return;
 
         if (selection && !selection.isCollapsed && selection.toString().trim().length > 0) {
             const range = selection.getRangeAt(0);
             const rect = range.getBoundingClientRect();
-            
-            // Calculate position relative to the viewport
             setToolbarPosition({
-                top: rect.top - 50,
+                top: rect.top - 60,
                 left: rect.left + (rect.width / 2)
             });
             setSelectedText(selection.toString());
-            setSelectionMode('initial'); // Reset to initial choice menu
+            setSelectionMode('initial');
         } else {
-            // Only hide if we aren't explicitly in a mode that requires focus
             setToolbarPosition(null);
             setSelectedText('');
             setSelectionMode('initial');
@@ -68,12 +126,29 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, onBack, onRefine 
 
     document.addEventListener('mouseup', handleSelection);
     return () => document.removeEventListener('mouseup', handleSelection);
-  }, []);
+  }, [viewState]);
 
   const handleRefineSubmit = async () => {
-      if (!selectedText || !instruction) return;
+      if (!selectedText || !instruction || !currentArtifact) return;
       setIsRefining(true);
-      await onRefine(selectedText, instruction);
+      
+      // Use the service directly here to get the full context capability
+      const newContent = await copilotService.refineArtifact(
+          currentArtifact.content.documentContent,
+          selectedText,
+          instruction
+      );
+      
+      if (newContent) {
+          const updatedArtifact = { 
+              ...currentArtifact, 
+              lastModified: new Date(),
+              content: { ...currentArtifact.content, documentContent: newContent }
+          };
+          setCurrentArtifact(updatedArtifact);
+          saveArtifact(updatedArtifact);
+      }
+      
       setIsRefining(false);
       setToolbarPosition(null);
       setInstruction('');
@@ -82,7 +157,6 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, onBack, onRefine 
 
   const handleAddComment = () => {
       if (!selectedText || !commentInput) return;
-      
       const newComment: DocumentComment = {
           id: Date.now().toString(),
           author: 'You',
@@ -91,7 +165,6 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, onBack, onRefine 
           timestamp: new Date(),
           taggedUsers: commentInput.match(/@\w+/g) || []
       };
-
       setComments(prev => [newComment, ...prev]);
       setCommentInput('');
       setToolbarPosition(null);
@@ -99,157 +172,185 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, onBack, onRefine 
       window.getSelection()?.removeAllRanges();
   };
 
+  // --- RENDERERS ---
+
+  if (viewState === 'LIST') {
+      return (
+          <div className="h-full flex flex-col bg-gray-50/50">
+              {/* List Header */}
+              <div className="bg-white border-b border-gray-200 px-8 py-6">
+                  <div className="max-w-6xl mx-auto">
+                      <div className="flex items-center justify-between mb-6">
+                          <div>
+                              <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Artifacts</h1>
+                              <p className="text-sm text-gray-500 mt-1">Manage proposals, briefs, and handoffs generated by Copilot.</p>
+                          </div>
+                          <button onClick={onBackToDashboard} className="md:hidden p-2 bg-gray-100 rounded-full">
+                              <ArrowLeft className="w-5 h-5" />
+                          </button>
+                      </div>
+
+                      <div className="flex flex-col md:flex-row gap-4">
+                          <div className="flex-1 relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                              <input 
+                                type="text" 
+                                placeholder="Search artifacts..." 
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-sm outline-none"
+                              />
+                          </div>
+                          <button className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-xl text-sm font-medium hover:bg-gray-50 text-gray-700">
+                              <Filter className="w-4 h-4" /> Filter
+                          </button>
+                      </div>
+                  </div>
+              </div>
+
+              {/* Grid Content */}
+              <div className="flex-1 overflow-y-auto p-8">
+                  <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {filteredArtifacts.map((artifact) => (
+                          <div 
+                            key={artifact.id}
+                            onClick={() => { setCurrentArtifact(artifact); setViewState('DETAIL'); }}
+                            className="bg-white border border-gray-200 rounded-2xl p-6 hover:shadow-lg hover:border-indigo-300 transition-all cursor-pointer group flex flex-col h-[280px]"
+                          >
+                              <div className="flex items-start justify-between mb-4">
+                                  <div className={`p-3 rounded-xl bg-gray-50 group-hover:bg-indigo-50 transition-colors`}>
+                                      {getIconForType(artifact.type)}
+                                  </div>
+                                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide border ${getStatusColor(artifact.status)}`}>
+                                      {artifact.status}
+                                  </span>
+                              </div>
+                              
+                              <h3 className="text-lg font-bold text-gray-900 mb-1 line-clamp-2">{artifact.title}</h3>
+                              <p className="text-sm text-gray-500 mb-6">{artifact.companyName}</p>
+                              
+                              <div className="mt-auto pt-6 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
+                                  <div className="flex items-center gap-1.5">
+                                      <Clock className="w-3.5 h-3.5" />
+                                      {new Date(artifact.lastModified).toLocaleDateString()}
+                                  </div>
+                                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <span className="font-semibold text-indigo-600">Open</span>
+                                      <ArrowLeft className="w-3 h-3 rotate-180 text-indigo-600" />
+                                  </div>
+                              </div>
+                          </div>
+                      ))}
+                      
+                      {/* Empty State */}
+                      {filteredArtifacts.length === 0 && (
+                          <div className="col-span-full flex flex-col items-center justify-center py-20 text-gray-400">
+                              <File className="w-12 h-12 mb-4 text-gray-300" />
+                              <p>No artifacts found matching your search.</p>
+                          </div>
+                      )}
+                  </div>
+              </div>
+          </div>
+      );
+  }
+
+  // --- DETAIL VIEW RENDER ---
+  if (!currentArtifact) return null;
+
   return (
-    <div className="h-full flex flex-col bg-gray-50 animate-in fade-in duration-500 relative overflow-hidden">
+    <div className="h-full flex flex-col bg-gray-50/50 animate-in fade-in duration-300 relative overflow-hidden font-sans">
       
       {/* Refine Overlay */}
       {isRefining && (
-          <div className="absolute inset-0 z-50 bg-white/50 backdrop-blur-[2px] flex items-center justify-center">
-              <div className="bg-white p-4 rounded-xl shadow-2xl flex items-center gap-3 border border-gray-200">
+          <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-sm flex items-center justify-center">
+              <div className="bg-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 border border-gray-200">
                   <Loader2 className="w-5 h-5 animate-spin text-black" />
-                  <span className="font-medium text-sm">Refining document with Copilot...</span>
+                  <span className="font-medium text-sm text-gray-900">Refining document...</span>
               </div>
           </div>
       )}
 
-      {/* Floating Selection Toolbar */}
+      {/* Floating Toolbar */}
       {toolbarPosition && !isRefining && viewMode === 'doc' && (
           <div 
-            className="fixed z-50 transform -translate-x-1/2 animate-in zoom-in-95 duration-200 shadow-2xl rounded-full"
+            className="fixed z-50 transform -translate-x-1/2 animate-in zoom-in-95 duration-200 drop-shadow-2xl"
             style={{ top: toolbarPosition.top, left: toolbarPosition.left }}
           >
               {selectionMode === 'initial' && (
-                  <div className="flex bg-black text-white rounded-full p-1 border border-gray-800">
-                      <button 
-                        onClick={() => setSelectionMode('ai')}
-                        className="flex items-center gap-2 px-4 py-2 hover:bg-gray-800 rounded-full transition-colors border-r border-gray-700"
-                      >
-                          <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                          <span className="text-xs font-semibold">Ask Copilot</span>
+                  <div className="flex bg-gray-900 text-white rounded-full p-1.5 border border-gray-700 shadow-xl">
+                      <button onClick={() => setSelectionMode('ai')} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-700 rounded-full transition-colors border-r border-gray-700">
+                          <Sparkles className="w-4 h-4 text-purple-400" /> <span className="text-xs font-bold">Ask Velocity</span>
                       </button>
-                      <button 
-                        onClick={() => setSelectionMode('comment')}
-                        className="flex items-center gap-2 px-4 py-2 hover:bg-gray-800 rounded-full transition-colors"
-                      >
-                          <MessageSquarePlus className="w-3.5 h-3.5 text-blue-400" />
-                          <span className="text-xs font-semibold">Comment</span>
+                      <button onClick={() => setSelectionMode('comment')} className="flex items-center gap-2 px-4 py-2 hover:bg-gray-700 rounded-full transition-colors">
+                          <MessageSquarePlus className="w-4 h-4 text-blue-400" /> <span className="text-xs font-bold">Comment</span>
                       </button>
                   </div>
               )}
-
               {selectionMode === 'ai' && (
-                   <div className="flex items-center gap-2 bg-black p-2 rounded-xl w-[320px]">
-                        <Sparkles className="w-4 h-4 text-purple-400 shrink-0 ml-2" />
-                        <input 
-                            type="text" 
-                            value={instruction}
-                            onChange={(e) => setInstruction(e.target.value)}
-                            placeholder="Ex: Make this more professional..."
-                            className="flex-1 bg-transparent border-none text-xs text-white placeholder-gray-500 focus:ring-0 focus:outline-none h-8"
-                            autoFocus
-                            onKeyDown={(e) => e.key === 'Enter' && handleRefineSubmit()}
-                        />
-                        <button 
-                            onClick={handleRefineSubmit}
-                            className="bg-white text-black p-1.5 rounded-lg hover:bg-gray-200 transition-colors"
-                        >
-                            <Check className="w-3 h-3" />
-                        </button>
+                   <div className="flex items-center gap-2 bg-gray-900 p-2 rounded-xl w-[320px] border border-gray-700 shadow-xl">
+                        <input type="text" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="Instruction..." className="flex-1 bg-transparent border-none text-xs text-white h-9 focus:ring-0" autoFocus onKeyDown={(e) => e.key === 'Enter' && handleRefineSubmit()} />
+                        <button onClick={handleRefineSubmit} className="bg-white text-black p-1.5 rounded-lg"><Check className="w-4 h-4" /></button>
                    </div>
               )}
-
-              {selectionMode === 'comment' && (
-                   <div className="flex items-center gap-2 bg-white border border-gray-200 p-2 rounded-xl w-[320px] shadow-xl">
-                        <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center shrink-0">
-                            <User className="w-3 h-3 text-gray-500" />
-                        </div>
-                        <input 
-                            type="text" 
-                            value={commentInput}
-                            onChange={(e) => setCommentInput(e.target.value)}
-                            placeholder="Add a comment or @mention..."
-                            className="flex-1 bg-transparent border-none text-xs text-gray-900 placeholder-gray-400 focus:ring-0 focus:outline-none h-8"
-                            autoFocus
-                            onKeyDown={(e) => e.key === 'Enter' && handleAddComment()}
-                        />
-                         <button 
-                            onClick={handleAddComment}
-                            className="bg-blue-600 text-white p-1.5 rounded-lg hover:bg-blue-700 transition-colors"
-                        >
-                            <Check className="w-3 h-3" />
-                        </button>
+               {selectionMode === 'comment' && (
+                   <div className="flex items-center gap-2 bg-white border border-gray-200 p-2 rounded-xl w-[320px] shadow-2xl">
+                        <input type="text" value={commentInput} onChange={(e) => setCommentInput(e.target.value)} placeholder="Comment..." className="flex-1 bg-transparent border-none text-xs text-black h-9 focus:ring-0" autoFocus onKeyDown={(e) => e.key === 'Enter' && handleAddComment()} />
+                        <button onClick={handleAddComment} className="bg-blue-600 text-white p-1.5 rounded-lg"><Check className="w-4 h-4" /></button>
                    </div>
               )}
           </div>
       )}
 
-      {/* Header Toolbar */}
-      <div className="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-6 shrink-0 z-20">
-        <div className="flex items-center gap-4">
+      {/* Detail Header */}
+      <div className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 shadow-sm">
+        <div className="flex items-center gap-3 md:gap-5">
              <button 
-                onClick={onBack}
-                className="p-2 hover:bg-gray-100 rounded-full text-gray-500 transition-colors"
-                title="Back to Dashboard"
+                onClick={() => setViewState('LIST')}
+                className="flex items-center gap-2 px-3 py-2 hover:bg-gray-100 rounded-lg text-gray-600 transition-colors text-xs font-bold uppercase tracking-wide"
              >
-                 <ArrowLeft className="w-4 h-4" />
+                 <ArrowLeft className="w-4 h-4" /> All Artifacts
              </button>
-             <div className="h-6 w-px bg-gray-200 mx-2"></div>
-             <div className="flex bg-gray-100 p-1 rounded-lg">
-                <button 
-                    onClick={() => setViewMode('doc')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-all ${viewMode === 'doc' ? 'bg-white shadow-sm text-black' : 'text-gray-500'}`}
-                >
-                    <FileText className="w-3.5 h-3.5" /> Document
-                </button>
-                <button 
-                    onClick={() => setViewMode('ppt')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-2 transition-all ${viewMode === 'ppt' ? 'bg-white shadow-sm text-black' : 'text-gray-500'}`}
-                >
-                    <Presentation className="w-3.5 h-3.5" /> Slides
-                </button>
+             <div className="h-6 w-px bg-gray-200 mx-1"></div>
+             <div className="flex flex-col">
+                 <h2 className="text-sm font-bold text-gray-900 leading-none">{currentArtifact.title}</h2>
+                 <span className="text-[10px] text-gray-500 mt-1">{currentArtifact.status} • Last edited {new Date(currentArtifact.lastModified).toLocaleTimeString()}</span>
              </div>
         </div>
-        <div className="flex gap-2">
-             <button 
-                onClick={() => setShowCommentSidebar(!showCommentSidebar)}
-                className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg text-xs font-medium transition-colors ${showCommentSidebar ? 'bg-blue-50 border-blue-200 text-blue-700' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
-             >
-                <MessageSquare className="w-3.5 h-3.5" />
-                Comments 
-                {comments.length > 0 && <span className="bg-blue-600 text-white px-1.5 rounded-full text-[10px]">{comments.length}</span>}
+        <div className="flex items-center gap-3">
+             <div className="flex bg-gray-100/80 p-1 rounded-lg border border-gray-200/50 mr-4">
+                <button onClick={() => setViewMode('doc')} className={`px-3 py-1.5 rounded-md text-xs font-bold flex gap-2 ${viewMode === 'doc' ? 'bg-white shadow-sm text-black' : 'text-gray-500'}`}><FileText className="w-3.5 h-3.5"/> Doc</button>
+                <button onClick={() => setViewMode('ppt')} className={`px-3 py-1.5 rounded-md text-xs font-bold flex gap-2 ${viewMode === 'ppt' ? 'bg-white shadow-sm text-black' : 'text-gray-500'}`}><Presentation className="w-3.5 h-3.5"/> Slides</button>
+             </div>
+             <button onClick={() => setShowCommentSidebar(!showCommentSidebar)} className="relative p-2 hover:bg-gray-100 rounded-lg text-gray-600">
+                 <MessageSquare className="w-5 h-5" />
+                 {comments.length > 0 && <span className="absolute top-1 right-1 w-2 h-2 bg-blue-600 rounded-full"></span>}
              </button>
-             <button className="flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium hover:bg-gray-50 text-gray-600">
-                <Download className="w-3.5 h-3.5" /> Export
-             </button>
-             <button className="flex items-center gap-2 px-3 py-1.5 bg-black text-white rounded-lg text-xs font-medium hover:bg-gray-800">
-                <Share2 className="w-3.5 h-3.5" /> Share
-             </button>
+             <button className="px-4 py-2 bg-black text-white rounded-lg text-xs font-bold hover:bg-gray-800 shadow-sm">Share</button>
         </div>
       </div>
 
-      {/* Main Layout: Canvas + Comment Sidebar */}
+      {/* Editor/Viewer Canvas */}
       <div className="flex-1 flex overflow-hidden">
-          
-          {/* Document Canvas */}
-          <div className="flex-1 overflow-y-auto p-12 bg-gray-50/50" ref={containerRef}>
+          <div className="flex-1 overflow-y-auto p-4 md:p-12 bg-gray-100/50" ref={containerRef}>
             <div className="max-w-4xl mx-auto">
                 {viewMode === 'doc' ? (
-                    <div className="bg-white shadow-xl min-h-[1000px] p-16 text-gray-800 border border-gray-200 transition-all selection:bg-blue-100 selection:text-blue-900">
-                        <article className="prose prose-sm max-w-none prose-headings:font-serif prose-headings:font-normal prose-p:leading-relaxed">
-                            <ReactMarkdown>{data.documentContent}</ReactMarkdown>
+                    <div className="bg-white shadow-sm min-h-[1000px] p-8 md:p-20 text-gray-800 border border-gray-200 rounded-sm">
+                        <article className="prose prose-sm max-w-none prose-headings:font-serif">
+                            <ReactMarkdown>{currentArtifact.content.documentContent}</ReactMarkdown>
                         </article>
                     </div>
                 ) : (
-                    <div className="space-y-8">
-                        {data.presentationContent.split('---').map((slide, idx) => {
+                    <div className="space-y-6 md:space-y-10">
+                        {currentArtifact.content.presentationContent.split('---').map((slide, idx) => {
                             if(!slide.trim()) return null;
                             return (
-                                <div key={idx} className="bg-white aspect-video p-12 shadow-lg border border-gray-200 flex flex-col justify-between hover:scale-[1.01] transition-transform duration-300">
-                                    <div className="prose prose-lg max-w-none">
+                                <div key={idx} className="bg-white aspect-video p-6 md:p-14 shadow-lg border border-gray-200 flex flex-col justify-between rounded-xl relative overflow-hidden">
+                                    <div className="prose prose-sm md:prose-lg max-w-none">
                                         <ReactMarkdown>{slide}</ReactMarkdown>
                                     </div>
                                     <div className="border-t border-gray-100 pt-6 flex justify-between items-center text-xs text-gray-400 font-mono">
-                                        <span>CONFIDENTIAL // CONTOSO</span>
+                                        <span>CONFIDENTIAL // {currentArtifact.companyName.toUpperCase()}</span>
                                         <span>{idx + 1}</span>
                                     </div>
                                 </div>
@@ -259,61 +360,19 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ data, onBack, onRefine 
                 )}
             </div>
           </div>
-
+          
           {/* Comment Sidebar */}
           {showCommentSidebar && (
-              <div className="w-80 bg-white border-l border-gray-200 flex flex-col shadow-xl animate-in slide-in-from-right duration-300 z-10">
-                  <div className="p-4 border-b border-gray-100 flex items-center justify-between">
-                      <h3 className="font-semibold text-sm text-gray-900">Comments</h3>
-                      <button onClick={() => setShowCommentSidebar(false)} className="text-gray-400 hover:text-black">
-                          <X className="w-4 h-4" />
-                      </button>
-                  </div>
+              <div className="w-80 bg-white border-l border-gray-200 flex flex-col shadow-xl z-10">
+                  <div className="p-4 border-b flex justify-between items-center bg-gray-50"><h3 className="font-bold text-sm">Comments</h3><button onClick={()=>setShowCommentSidebar(false)}><X className="w-4 h-4"/></button></div>
                   <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                      {comments.length === 0 ? (
-                          <div className="text-center py-10">
-                              <div className="w-10 h-10 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                                  <MessageSquarePlus className="w-5 h-5 text-gray-400" />
-                              </div>
-                              <p className="text-sm text-gray-500">No comments yet.</p>
-                              <p className="text-xs text-gray-400 mt-1">Select text to add one.</p>
+                      {comments.map(c => (
+                          <div key={c.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                              <div className="font-bold text-xs mb-1">{c.author}</div>
+                              <p>{c.text}</p>
                           </div>
-                      ) : (
-                          comments.map(comment => (
-                              <div key={comment.id} className="bg-gray-50 rounded-xl p-3 border border-gray-200 group hover:border-blue-300 transition-colors">
-                                  <div className="flex items-center gap-2 mb-2">
-                                      <div className="w-6 h-6 bg-purple-600 rounded-full flex items-center justify-center text-[10px] text-white font-bold">
-                                          {comment.author[0]}
-                                      </div>
-                                      <span className="text-xs font-bold text-gray-900">{comment.author}</span>
-                                      <span className="text-[10px] text-gray-400 ml-auto">
-                                          {comment.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                      </span>
-                                  </div>
-                                  
-                                  {/* Context Quote */}
-                                  <div className="pl-2 border-l-2 border-gray-300 mb-2">
-                                      <p className="text-[10px] text-gray-500 line-clamp-2 italic">"{comment.selectedContext}"</p>
-                                  </div>
-
-                                  <p className="text-xs text-gray-800 leading-relaxed">
-                                      {comment.text.split(' ').map((word, i) => 
-                                          word.startsWith('@') ? <span key={i} className="text-blue-600 font-medium">{word} </span> : word + ' '
-                                      )}
-                                  </p>
-
-                                  {comment.taggedUsers && comment.taggedUsers.length > 0 && (
-                                      <div className="mt-2 flex gap-1">
-                                          {comment.taggedUsers.map((tag, i) => (
-                                              <span key={i} className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-[9px] font-medium flex items-center gap-0.5">
-                                                  <AtSign className="w-2 h-2" /> {tag.replace('@', '')}
-                                              </span>
-                                          ))}
-                                      </div>
-                                  )}
-                              </div>
-                          ))
-                      )}
+                      ))}
+                      {comments.length === 0 && <div className="text-center text-gray-400 text-xs mt-10">No comments yet.</div>}
                   </div>
               </div>
           )}
