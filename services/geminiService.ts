@@ -1,5 +1,5 @@
-import { GoogleGenAI, Type, Tool } from "@google/genai";
-import { Lead, PricingItem } from "../types";
+import { GoogleGenAI, Type, Tool, Modality } from "@google/genai";
+import { Lead, PricingItem, Artifact } from "../types";
 import { generateArtifactWithGemini } from "./openaiService";
 import { getLeads, getNewsForCompany } from "./dataService";
 
@@ -144,6 +144,28 @@ async function draftFollowUp(args: { companyName: string, meetingContext: string
     return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
 }
 
+// --- MULTI-MODAL TOOLS ---
+
+async function draftVoiceOver(args: { companyName: string, script: string }): Promise<string> {
+    // This function acts as a bridge. The actual generation happens in the CopilotService due to special model config.
+    // We return a marker that the orchestrator will recognize to run the actual API call.
+    return JSON.stringify({
+        action: "generate_audio",
+        companyName: args.companyName,
+        script: args.script
+    });
+}
+
+async function createDemoVideo(args: { companyName: string, prompt: string }): Promise<string> {
+    // Bridge for Video generation
+    return JSON.stringify({
+        action: "generate_video",
+        companyName: args.companyName,
+        prompt: args.prompt
+    });
+}
+
+
 // --- Tool Declarations ---
 
 const tools: Tool[] = [
@@ -223,6 +245,30 @@ const tools: Tool[] = [
             },
             required: ["companyName", "meetingContext", "instructions"]
         }
+      },
+      {
+          name: "draftVoiceOver",
+          description: "Generates an audio voice-over script and audio file for a pitch. Trigger via @Velocity voice over.",
+          parameters: {
+              type: Type.OBJECT,
+              properties: {
+                  companyName: { type: Type.STRING },
+                  script: { type: Type.STRING, description: "The text to speak" }
+              },
+              required: ["companyName", "script"]
+          }
+      },
+      {
+          name: "createDemoVideo",
+          description: "Generates a short demo video concept using Veo. Trigger via @Velocity demo video.",
+          parameters: {
+              type: Type.OBJECT,
+              properties: {
+                  companyName: { type: Type.STRING },
+                  prompt: { type: Type.STRING, description: "Visual description of the video" }
+              },
+              required: ["companyName", "prompt"]
+          }
       }
     ]
   }
@@ -236,6 +282,77 @@ export class CopilotService {
 
   constructor() {
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || 'dummy_key' });
+  }
+
+  // --- AUDIO GENERATION (TTS) ---
+  async generateAudio(text: string): Promise<string | null> {
+      try {
+          const ttsAi = new GoogleGenAI({ apiKey: process.env.API_KEY || 'dummy_key' });
+          const response = await ttsAi.models.generateContent({
+              model: "gemini-2.5-flash-preview-tts",
+              contents: [{ parts: [{ text: text }] }],
+              config: {
+                  responseModalities: [Modality.AUDIO],
+                  speechConfig: {
+                      voiceConfig: {
+                          prebuiltVoiceConfig: { voiceName: 'Kore' },
+                      },
+                  },
+              },
+          });
+          
+          return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || null;
+      } catch (e) {
+          console.error("Audio Generation Failed", e);
+          return null;
+      }
+  }
+
+  // --- VIDEO GENERATION (VEO) ---
+  async generateVideo(prompt: string): Promise<string | null> {
+      try {
+          // Check for Paid Key Selection for Veo
+          if ((window as any).aistudio) {
+              const hasKey = await (window as any).aistudio.hasSelectedApiKey();
+              if (!hasKey) {
+                   await (window as any).aistudio.openSelectKey();
+                   // Assuming user selects key, re-instantiate or just proceed. 
+                   // In a real app we might await a signal, here we assume success or fail on next call.
+              }
+          }
+
+          // Important: Use the latest key from env after selection
+          const videoAi = new GoogleGenAI({ apiKey: process.env.API_KEY }); 
+          
+          let operation = await videoAi.models.generateVideos({
+              model: 'veo-3.1-fast-generate-preview',
+              prompt: prompt,
+              config: {
+                  numberOfVideos: 1,
+                  resolution: '720p',
+                  aspectRatio: '16:9'
+              }
+          });
+
+          // Polling
+          let retryCount = 0;
+          while (!operation.done && retryCount < 20) {
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Poll every 2s
+              operation = await videoAi.operations.getVideosOperation({operation: operation});
+              retryCount++;
+          }
+
+          if (operation.done && operation.response?.generatedVideos?.[0]?.video?.uri) {
+               const uri = operation.response.generatedVideos[0].video.uri;
+               // Append key for access
+               return `${uri}&key=${process.env.API_KEY}`;
+          }
+          return null;
+
+      } catch (e) {
+          console.error("Video Generation Failed", e);
+          return null;
+      }
   }
 
   async refineArtifact(fullContent: string, selectedText: string, instruction: string): Promise<string> {
@@ -252,8 +369,23 @@ export class CopilotService {
           return response.text || fullContent;
       } catch (e) {
           console.error("Refinement failed (API Error). Returning original.", e);
-          return fullContent; // Graceful degradation for refinement
+          return fullContent; 
       }
+  }
+
+  async generateEmailForArtifact(artifact: Artifact): Promise<string> {
+    try {
+        const jsonStr = await generateArtifactWithGemini('email', {
+            companyName: artifact.companyName,
+            meetingContext: `sharing the ${artifact.type}: "${artifact.title}"`
+        }, "Draft a concise, professional email to the client attaching this document. Keep it friendly.");
+        
+        const parsed = JSON.parse(jsonStr);
+        return parsed.documentContent;
+    } catch (e) {
+        console.error("Email generation failed", e);
+        return `Subject: ${artifact.title}\n\nPlease find attached the ${artifact.title} for your review.\n\nBest regards,\n[Your Name]`;
+    }
   }
 
   async sendMessage(history: { role: string; parts: { text: string }[] }[], newMessage: string): Promise<string> {
@@ -274,11 +406,13 @@ export class CopilotService {
         2. **Handoffs**: "@Velocity handoff [Company] to [Team]" -> Use \`draftHandoff\`.
         3. **Meeting Prep**: "@Velocity prep meeting [Company]" -> Use \`prepareMeetingBrief\`.
         4. **Follow-ups**: "@Velocity follow up [Company]" -> Use \`draftFollowUp\`.
-        5. **Proactive Alerts**: You can detect "Buying Signals" and "Renewal Risks" from news and CRM data.
+        5. **Voice Over**: "@Velocity voice over [Company] [Script]" -> Use \`draftVoiceOver\`.
+        6. **Demo Video**: "@Velocity demo video [Company] [Prompt]" -> Use \`createDemoVideo\`.
+        7. **Proactive Alerts**: You can detect "Buying Signals" and "Renewal Risks".
         
         **Rules:**
         - If the user uses a @Velocity command, map it to the correct tool immediately.
-        - For any content generation (Proposal, Handoff, Email, Brief), ALWAYS use the respective tool. DO NOT write it in chat.
+        - For any content generation, ALWAYS use the respective tool. DO NOT write it in chat.
         - The tools return JSON wrapped in <artifact_payload>. Output this EXACTLY.
         - Be concise and professional.
         `
@@ -310,6 +444,31 @@ export class CopilotService {
                      case 'draftHandoff': response = { artifact: await draftHandoff(call.args as any) }; break;
                      case 'prepareMeetingBrief': response = { artifact: await prepareMeetingBrief(call.args as any) }; break;
                      case 'draftFollowUp': response = { artifact: await draftFollowUp(call.args as any) }; break;
+                     
+                     // Handlers for Audio/Video that trigger secondary API calls
+                     case 'draftVoiceOver': {
+                         const args = call.args as any;
+                         const audioBase64 = await this.generateAudio(args.script);
+                         const artifactJson = JSON.stringify({
+                             documentContent: `## Voice Over Script for ${args.companyName}\n\n${args.script}`,
+                             presentationContent: `# Voice Over\n\n- **Client**: ${args.companyName}\n- **Status**: Generated`,
+                             audioContent: audioBase64 || undefined
+                         });
+                         response = { artifact: `<artifact_payload>\n${artifactJson}\n</artifact_payload>` };
+                         break;
+                     }
+                     case 'createDemoVideo': {
+                         const args = call.args as any;
+                         const videoUri = await this.generateVideo(args.prompt);
+                         const artifactJson = JSON.stringify({
+                             documentContent: `## Demo Video Prompt for ${args.companyName}\n\n**Prompt Used:** ${args.prompt}`,
+                             presentationContent: `# Demo Video\n\n- **Client**: ${args.companyName}\n- **Model**: Veo 3.1`,
+                             videoUri: videoUri || undefined,
+                             videoPrompt: args.prompt
+                         });
+                         response = { artifact: `<artifact_payload>\n${artifactJson}\n</artifact_payload>` };
+                         break;
+                     }
                  }
              } catch (e) {
                  response = { error: `Tool execution failed: ${e}` };
@@ -335,14 +494,12 @@ export class CopilotService {
   private async handleFallbackResponse(query: string): Promise<string> {
       const lowerQuery = query.toLowerCase();
       const leads = getLeads();
-      // Try to find company in query
       const lead = leads.find(l => lowerQuery.includes(l.companyName.toLowerCase())) || leads[0];
       const companyName = lead ? lead.companyName : "Client";
 
       let artifactResponse = "";
       let actionTaken = "";
 
-      // Force-invoke the tool logic (which now has its own fallback templates)
       if (lowerQuery.includes("proposal")) {
           artifactResponse = await draftProposal({ companyName, instructions: query });
           actionTaken = "drafting a proposal";

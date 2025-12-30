@@ -7,7 +7,8 @@ import Analytics from './components/Analytics';
 import HistoryView from './components/HistoryView';
 import CalendarView from './components/CalendarView';
 import { WorkspaceMode, Lead, ArtifactData, CalendarEvent } from './types';
-import { ChevronLeft, Bot, Layers } from 'lucide-react';
+import { ChevronLeft, Layers } from 'lucide-react';
+import { VelocityLogo } from './components/VelocityLogo';
 import { copilotService } from './services/geminiService';
 import { createArtifact } from './services/artifactService';
 import { getLeads } from './services/dataService';
@@ -130,7 +131,7 @@ const App: React.FC = () => {
             onClick={() => setIsCopilotOpen(true)}
             className="hidden md:flex fixed right-0 top-1/2 -translate-y-1/2 bg-black text-white p-2 rounded-l-lg shadow-lg hover:bg-gray-800 transition-all z-40 flex-col items-center gap-2 group"
           >
-              <Bot className="w-5 h-5" />
+              <VelocityLogo className="w-6 h-6" />
               <div className="writing-vertical-lr text-[10px] font-bold tracking-widest uppercase transform rotate-180 py-2">Copilot</div>
               <ChevronLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           </button>

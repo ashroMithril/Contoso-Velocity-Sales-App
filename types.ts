@@ -52,12 +52,16 @@ export interface ChatSession {
 export interface ArtifactData {
     documentContent: string;
     presentationContent: string;
+    // New Multi-modal fields
+    audioContent?: string; // Base64 Raw PCM
+    videoUri?: string;     // Remote URL for Veo video
+    videoPrompt?: string;
 }
 
 export interface Artifact {
     id: string;
     title: string;
-    type: 'Proposal' | 'Handoff' | 'Meeting Brief' | 'Email' | 'Research' | 'Generic';
+    type: 'Proposal' | 'Handoff' | 'Meeting Brief' | 'Email' | 'Research' | 'VoiceOver' | 'DemoVideo' | 'Generic';
     status: 'Draft' | 'In Review' | 'Finalized' | 'Sent';
     companyName: string;
     createdAt: Date;

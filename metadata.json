@@ -1,5 +1,7 @@
 {
   "name": "Contoso Sales Copilot",
   "description": "An intelligent M365-style Copilot agent designed to streamline sales proposal generation by integrating CRM, pricing, and legal data into a unified collaborative workspace.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

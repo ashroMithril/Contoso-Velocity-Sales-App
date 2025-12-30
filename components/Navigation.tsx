@@ -1,5 +1,6 @@
 import React from 'react';
-import { LayoutGrid, BarChart2, History, Settings, Bot, Layers, Calendar } from 'lucide-react';
+import { LayoutGrid, BarChart2, History, Settings, Layers, Calendar } from 'lucide-react';
+import { VelocityLogo } from './VelocityLogo';
 import { WorkspaceMode } from '../types';
 
 interface NavigationProps {
@@ -38,7 +39,7 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onNavigate, onTogg
                     className="w-11 h-11 bg-indigo-600 rounded-xl grid place-items-center shadow-lg hover:shadow-indigo-500/30 transition-all cursor-pointer hover:scale-105 active:scale-95 group relative"
                     title="Toggle Copilot"
                 >
-                    <Bot className="w-5 h-5 text-white" />
+                    <VelocityLogo className="w-6 h-6 text-white" />
                     <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
                 </button>
             </div>
@@ -73,7 +74,7 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onNavigate, onTogg
                 onClick={onToggleCopilot}
                 className="w-12 h-12 bg-black rounded-full grid place-items-center shadow-lg text-white -mt-8 border-4 border-white"
             >
-                <Bot className="w-6 h-6" />
+                <VelocityLogo className="w-6 h-6" />
             </button>
 
              <NavItem mode={WorkspaceMode.ARTIFACTS} icon={Layers} label="Artifacts" />

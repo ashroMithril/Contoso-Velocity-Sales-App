@@ -113,12 +113,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onSelectLead, onRunAction }) => {
           <div className="max-w-7xl mx-auto space-y-4">
               {/* Input Row */}
               <div className="flex flex-col md:flex-row md:items-center gap-4 md:gap-6">
-                  <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 md:w-9 md:h-9 bg-black text-white rounded-lg flex items-center justify-center shadow-md">
-                          <Sparkles className="w-4 h-4" />
-                      </div>
-                      <span className="font-semibold text-lg tracking-tight text-gray-900">Wayfinder</span>
-                  </div>
+                  {/* Wayfinder branding removed */}
                   
                   <div className="flex-1 relative group w-full">
                      <form onSubmit={handleWayfinderSubmit} className="relative">
@@ -137,7 +132,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onSelectLead, onRunAction }) => {
               </div>
 
               {/* Quick Actions Chips */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar md:ml-[calc(36px+24px)]">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar">
                   {quickActions.map((action, idx) => (
                       <button 
                         key={idx}
