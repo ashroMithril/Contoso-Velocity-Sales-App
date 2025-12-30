@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Lead } from '../types';
 import { getLeads } from '../services/dataService';
 import { 
@@ -20,7 +20,9 @@ import {
     Filter,
     TrendingUp,
     RefreshCw,
-    MoreHorizontal
+    MoreHorizontal,
+    Mic,
+    StopCircle
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -31,10 +33,70 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ onSelectLead, onRunAction }) => {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [wayfinderInput, setWayfinderInput] = useState('');
+  
+  // Voice Input State
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<any>(null);
 
   useEffect(() => {
     setLeads(getLeads());
   }, []);
+
+  // Initialize Speech Recognition
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognitionRef.current = new SpeechRecognition();
+            recognitionRef.current.continuous = true;
+            recognitionRef.current.interimResults = true;
+            recognitionRef.current.lang = 'en-US';
+
+            recognitionRef.current.onresult = (event: any) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+                
+                if (finalTranscript) {
+                    setWayfinderInput(prev => {
+                        const trailingSpace = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
+                        return prev + trailingSpace + finalTranscript;
+                    });
+                }
+            };
+
+            recognitionRef.current.onerror = (event: any) => {
+                console.error("Speech recognition error", event.error);
+                setIsListening(false);
+            };
+
+            recognitionRef.current.onend = () => {
+                setIsListening(false);
+            };
+        }
+    }
+  }, []);
+
+  const toggleListening = () => {
+      if (isListening) {
+          recognitionRef.current?.stop();
+          setIsListening(false);
+      } else {
+          try {
+            recognitionRef.current?.start();
+            setIsListening(true);
+          } catch (e) {
+              console.error("Failed to start recognition", e);
+          }
+      }
+  };
 
   const handleWayfinderSubmit = (e: React.FormEvent) => {
       e.preventDefault();
@@ -125,8 +187,21 @@ const Dashboard: React.FC<DashboardProps> = ({ onSelectLead, onRunAction }) => {
                             value={wayfinderInput}
                             onChange={(e) => setWayfinderInput(e.target.value)}
                             placeholder="Try '@Velocity draft proposal'..."
-                            className="w-full bg-white border border-gray-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 rounded-xl py-3 pl-11 pr-4 text-sm transition-all outline-none placeholder-gray-400 shadow-sm hover:border-gray-300"
+                            className="w-full bg-white border border-gray-200 focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 rounded-xl py-3 pl-11 pr-12 text-sm transition-all outline-none placeholder-gray-400 shadow-sm hover:border-gray-300"
                         />
+                        {/* Mic Button */}
+                        <button
+                            type="button"
+                            onClick={toggleListening}
+                            className={`absolute right-3 top-1/2 -translate-y-1/2 p-1.5 rounded-lg transition-colors flex items-center justify-center ${
+                                isListening 
+                                ? 'bg-red-500 text-white animate-pulse' 
+                                : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'
+                            }`}
+                            title="Voice Input"
+                        >
+                            {isListening ? <StopCircle className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                        </button>
                      </form>
                   </div>
               </div>
