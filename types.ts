@@ -16,6 +16,14 @@ export interface Lead {
   suggestedAction?: string;
 }
 
+export interface Reference {
+    id: string;
+    title: string;
+    type: 'crm' | 'email' | 'file' | 'news' | 'meeting';
+    keyPoint: string;
+    url?: string;
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'model';
@@ -25,12 +33,18 @@ export interface Message {
   functionResponse?: any;
   // New: Link to generated artifact
   relatedArtifact?: ArtifactData;
+  // New: Reasoning trace from the model
+  reasoning?: string[]; 
+  // New: References/Citations
+  references?: Reference[];
 }
 
 export enum WorkspaceMode {
+  COPILOT = 'COPILOT',
   DASHBOARD = 'DASHBOARD',
   CALENDAR = 'CALENDAR',
   ARTIFACTS = 'ARTIFACTS',
+  REPOSITORY = 'REPOSITORY',
   HISTORY = 'HISTORY'
 }
 

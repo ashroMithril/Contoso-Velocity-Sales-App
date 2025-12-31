@@ -1,7 +1,8 @@
+
 import { GoogleGenAI, Type, Tool, Modality } from "@google/genai";
 import { Lead, PricingItem, Artifact } from "../types";
 import { generateArtifactWithGemini } from "./openaiService";
-import { getLeads, getNewsForCompany } from "./dataService";
+import { getLeads, getNewsForCompany, getEmailHistory, getOrgChanges as getOrgChangesData } from "./dataService";
 
 // --- Mock Pricing Data ---
 
@@ -65,6 +66,16 @@ async function getCompanyNews(args: { companyName: string }): Promise<string[]> 
     return getNewsForCompany(args.companyName);
 }
 
+async function getRecentEmails(args: { companyName: string }): Promise<any[]> {
+    console.log(`[Tool] Fetching emails for: ${args.companyName}`);
+    return getEmailHistory(args.companyName);
+}
+
+async function getOrgChanges(args: { companyName: string }): Promise<any[]> {
+    console.log(`[Tool] Fetching org changes for: ${args.companyName}`);
+    return getOrgChangesData(args.companyName);
+}
+
 async function getPricing(args: { productKeyword: string }): Promise<PricingItem[]> {
   console.log(`[Tool] Getting pricing for: ${args.productKeyword}`);
   return MOCK_PRICING.filter(p => p.name.toLowerCase().includes(args.productKeyword.toLowerCase()));
@@ -100,71 +111,46 @@ async function draftProposal(args: { companyName: string, instructions: string }
     const leads = getLeads();
     const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName, industry: 'Technology', needs: ['General Services'] } as Lead;
     
-    const jsonContent = await generateArtifactWithGemini(
+    // generateArtifactWithGemini returns the formatted XML string
+    return await generateArtifactWithGemini(
         'proposal',
         { companyName: lead.companyName, industry: lead.industry, needs: lead.needs },
         args.instructions
     );
-    return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
 }
 
 async function draftHandoff(args: { companyName: string, targetTeam: string, instructions: string }): Promise<string> {
     const leads = getLeads();
     const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName } as Lead;
 
-    const jsonContent = await generateArtifactWithGemini(
+    return await generateArtifactWithGemini(
         'handoff',
         { companyName: lead.companyName, targetTeam: args.targetTeam },
         args.instructions
     );
-    return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
 }
 
 async function prepareMeetingBrief(args: { companyName: string, instructions: string }): Promise<string> {
     const leads = getLeads();
     const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName } as Lead;
 
-    const jsonContent = await generateArtifactWithGemini(
+    return await generateArtifactWithGemini(
         'meeting_brief',
         { companyName: lead.companyName },
         args.instructions
     );
-    return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
 }
 
 async function draftFollowUp(args: { companyName: string, meetingContext: string, instructions: string }): Promise<string> {
     const leads = getLeads();
     const lead = leads.find(l => l.companyName.toLowerCase().includes(args.companyName.toLowerCase())) || { companyName: args.companyName } as Lead;
 
-    const jsonContent = await generateArtifactWithGemini(
+    return await generateArtifactWithGemini(
         'email',
         { companyName: lead.companyName, meetingContext: args.meetingContext },
         args.instructions
     );
-    return `<artifact_payload>\n${jsonContent}\n</artifact_payload>`;
 }
-
-// --- MULTI-MODAL TOOLS ---
-
-async function draftVoiceOver(args: { companyName: string, script: string }): Promise<string> {
-    // This function acts as a bridge. The actual generation happens in the CopilotService due to special model config.
-    // We return a marker that the orchestrator will recognize to run the actual API call.
-    return JSON.stringify({
-        action: "generate_audio",
-        companyName: args.companyName,
-        script: args.script
-    });
-}
-
-async function createDemoVideo(args: { companyName: string, prompt: string }): Promise<string> {
-    // Bridge for Video generation
-    return JSON.stringify({
-        action: "generate_video",
-        companyName: args.companyName,
-        prompt: args.prompt
-    });
-}
-
 
 // --- Tool Declarations ---
 
@@ -179,6 +165,16 @@ const tools: Tool[] = [
       {
         name: "getCompanyNews",
         description: "Fetch the latest news headlines and updates.",
+        parameters: { type: Type.OBJECT, properties: { companyName: { type: Type.STRING } }, required: ["companyName"] }
+      },
+      {
+        name: "getRecentEmails",
+        description: "Fetch recent email threads and communication signals from the account.",
+        parameters: { type: Type.OBJECT, properties: { companyName: { type: Type.STRING } }, required: ["companyName"] }
+      },
+      {
+        name: "getOrgChanges",
+        description: "Check for recent leadership or role changes in the organization.",
         parameters: { type: Type.OBJECT, properties: { companyName: { type: Type.STRING } }, required: ["companyName"] }
       },
       {
@@ -277,17 +273,14 @@ const tools: Tool[] = [
 // --- API Service ---
 
 export class CopilotService {
-  private ai: GoogleGenAI;
   private modelName = "gemini-3-flash-preview"; 
-
-  constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || 'dummy_key' });
-  }
 
   // --- AUDIO GENERATION (TTS) ---
   async generateAudio(text: string): Promise<string | null> {
       try {
-          const ttsAi = new GoogleGenAI({ apiKey: process.env.API_KEY || 'dummy_key' });
+          if (!process.env.API_KEY || process.env.API_KEY === 'dummy_key') throw new Error("Missing API Key");
+          
+          const ttsAi = new GoogleGenAI({ apiKey: process.env.API_KEY });
           const response = await ttsAi.models.generateContent({
               model: "gemini-2.5-flash-preview-tts",
               contents: [{ parts: [{ text: text }] }],
@@ -311,17 +304,16 @@ export class CopilotService {
   // --- VIDEO GENERATION (VEO) ---
   async generateVideo(prompt: string): Promise<string | null> {
       try {
+          if (!process.env.API_KEY || process.env.API_KEY === 'dummy_key') throw new Error("Missing API Key");
+
           // Check for Paid Key Selection for Veo
           if ((window as any).aistudio) {
               const hasKey = await (window as any).aistudio.hasSelectedApiKey();
               if (!hasKey) {
                    await (window as any).aistudio.openSelectKey();
-                   // Assuming user selects key, re-instantiate or just proceed. 
-                   // In a real app we might await a signal, here we assume success or fail on next call.
               }
           }
 
-          // Important: Use the latest key from env after selection
           const videoAi = new GoogleGenAI({ apiKey: process.env.API_KEY }); 
           
           let operation = await videoAi.models.generateVideos({
@@ -344,7 +336,6 @@ export class CopilotService {
 
           if (operation.done && operation.response?.generatedVideos?.[0]?.video?.uri) {
                const uri = operation.response.generatedVideos[0].video.uri;
-               // Append key for access
                return `${uri}&key=${process.env.API_KEY}`;
           }
           return null;
@@ -356,32 +347,33 @@ export class CopilotService {
   }
 
   async refineArtifact(fullContent: string, selectedText: string, instruction: string): Promise<string> {
-      const prompt = `
-        You are an expert document editor.
-        TASK: Update the document based on the user's instruction.
-        ORIGINAL: ${fullContent}
-        SELECTED: "${selectedText}"
-        INSTRUCTION: "${instruction}"
-        OUTPUT: Return ONLY the full updated markdown content.
-      `;
       try {
-          const response = await this.ai.models.generateContent({ model: this.modelName, contents: prompt });
+          if (!process.env.API_KEY || process.env.API_KEY === 'dummy_key') throw new Error("Missing API Key");
+          const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+          const prompt = `
+            You are an expert document editor.
+            TASK: Update the document based on the user's instruction.
+            ORIGINAL: ${fullContent}
+            SELECTED: "${selectedText}"
+            INSTRUCTION: "${instruction}"
+            OUTPUT: Return ONLY the full updated markdown content.
+          `;
+          const response = await ai.models.generateContent({ model: this.modelName, contents: prompt });
           return response.text || fullContent;
       } catch (e) {
-          console.error("Refinement failed (API Error). Returning original.", e);
+          console.error("Refinement failed. Returning original.", e);
           return fullContent; 
       }
   }
 
   async generateEmailForArtifact(artifact: Artifact): Promise<string> {
     try {
-        const jsonStr = await generateArtifactWithGemini('email', {
-            companyName: artifact.companyName,
-            meetingContext: `sharing the ${artifact.type}: "${artifact.title}"`
-        }, "Draft a concise, professional email to the client attaching this document. Keep it friendly.");
-        
-        const parsed = JSON.parse(jsonStr);
-        return parsed.documentContent;
+        if (!process.env.API_KEY || process.env.API_KEY === 'dummy_key') return "Draft email content...";
+
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const prompt = `Draft a concise email to the client ${artifact.companyName} attaching the ${artifact.title}. Return only the body text.`;
+        const response = await ai.models.generateContent({ model: this.modelName, contents: prompt });
+        return response.text || "Draft email content...";
     } catch (e) {
         console.error("Email generation failed", e);
         return `Subject: ${artifact.title}\n\nPlease find attached the ${artifact.title} for your review.\n\nBest regards,\n[Your Name]`;
@@ -390,30 +382,64 @@ export class CopilotService {
 
   async sendMessage(history: { role: string; parts: { text: string }[] }[], newMessage: string): Promise<string> {
     try {
-      const model = this.ai.models;
+      if (!process.env.API_KEY || process.env.API_KEY === 'dummy_key') {
+          return await this.handleFallbackResponse(newMessage);
+      }
+
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const model = ai.models;
       let contents: any[] = [...history, { role: 'user', parts: [{ text: newMessage }] }];
 
       const config = {
         tools: tools,
+        thinkingConfig: { thinkingBudget: 1024 }, 
         systemInstruction: `You are Velocity, the Contoso Sales Copilot.
         
         **Persona:**
         You are an intelligent M365-style agent helping sales teams.
-        You support "Quick Commands" via the @Velocity tag.
+        
+        **CRITICAL OUTPUT FORMAT:**
+        For EVERY response that involves generating an artifact (proposal, handoff, brief, email), you MUST follow this XML format:
+        
+        <reasoning>
+        - Step 1: Analyzing...
+        - Step 2: Retrieving data...
+        </reasoning>
+        
+        <references>
+        [
+          {"type": "crm", "title": "CRM Data: Acme Corp", "keyPoint": "Budget $150k, Decision Maker: Alice"},
+          {"type": "email", "title": "Email from Alice", "keyPoint": "Concern about 24/7 support pricing"},
+          {"type": "file", "title": "Past Proposal 2023", "keyPoint": "Previous rejection due to price sensitivity"}
+        ]
+        </references>
+
+        <artifact_payload>
+        { "documentContent": "...", "presentationContent": "..." }
+        </artifact_payload>
+
+        If you are just chatting, you can skip the tags.
+
+        **CRITICAL: PROPOSAL PRICING**
+        When generating a proposal, ALWAYS include a specific "Investment" or "Pricing" section with a Markdown Table.
+        Use real numbers based on the product data available or reasonable estimates.
+        
+        **CRITICAL REASONING PROCESS:**
+        When the user asks you to draft a proposal or analyze an account, you MUST consult the following data sources:
+        1. **Recent Emails (\`getRecentEmails\`):** Check for blockers.
+        2. **Org Changes (\`getOrgChanges\`):** Check for new stakeholders.
+        3. **Company News (\`getCompanyNews\`):** Check for context.
+        4. **Previous Proposals (\`searchKnowledgeBase\`):** Check pricing history.
         
         **Capabilities & Commands:**
         1. **Proposal Generation**: "@Velocity draft proposal [Company]" -> Use \`draftProposal\`.
         2. **Handoffs**: "@Velocity handoff [Company] to [Team]" -> Use \`draftHandoff\`.
         3. **Meeting Prep**: "@Velocity prep meeting [Company]" -> Use \`prepareMeetingBrief\`.
         4. **Follow-ups**: "@Velocity follow up [Company]" -> Use \`draftFollowUp\`.
-        5. **Voice Over**: "@Velocity voice over [Company] [Script]" -> Use \`draftVoiceOver\`.
-        6. **Demo Video**: "@Velocity demo video [Company] [Prompt]" -> Use \`createDemoVideo\`.
-        7. **Proactive Alerts**: You can detect "Buying Signals" and "Renewal Risks".
         
         **Rules:**
         - If the user uses a @Velocity command, map it to the correct tool immediately.
-        - For any content generation, ALWAYS use the respective tool. DO NOT write it in chat.
-        - The tools return JSON wrapped in <artifact_payload>. Output this EXACTLY.
+        - The tools return XML/JSON mixed content. Output this EXACTLY as returned by the tool.
         - Be concise and professional.
         `
       };
@@ -421,7 +447,7 @@ export class CopilotService {
       let result = await model.generateContent({ model: this.modelName, contents: contents, config: config });
 
       let turnCount = 0;
-      const MAX_TURNS = 5;
+      const MAX_TURNS = 10;
 
       while (result.candidates?.[0]?.content?.parts?.some(p => p.functionCall) && turnCount < MAX_TURNS) {
           turnCount++;
@@ -437,15 +463,17 @@ export class CopilotService {
                  switch (call.name) {
                      case 'getLeadDetails': response = await getLeadDetails(call.args as any) || { error: "Lead not found" }; break;
                      case 'getCompanyNews': response = { news: await getCompanyNews(call.args as any) }; break;
+                     case 'getRecentEmails': response = { emails: await getRecentEmails(call.args as any) }; break;
+                     case 'getOrgChanges': response = { changes: await getOrgChanges(call.args as any) }; break;
                      case 'getPricing': response = await getPricing(call.args as any) || []; break;
                      case 'getLegalClause': response = { clause: await getLegalClause(call.args as any) }; break;
                      case 'searchKnowledgeBase': response = await searchKnowledgeBase(call.args as any); break;
-                     case 'draftProposal': response = { artifact: await draftProposal(call.args as any) }; break;
-                     case 'draftHandoff': response = { artifact: await draftHandoff(call.args as any) }; break;
-                     case 'prepareMeetingBrief': response = { artifact: await prepareMeetingBrief(call.args as any) }; break;
-                     case 'draftFollowUp': response = { artifact: await draftFollowUp(call.args as any) }; break;
+                     // These return string with XML tags now
+                     case 'draftProposal': response = { result: await draftProposal(call.args as any) }; break;
+                     case 'draftHandoff': response = { result: await draftHandoff(call.args as any) }; break;
+                     case 'prepareMeetingBrief': response = { result: await prepareMeetingBrief(call.args as any) }; break;
+                     case 'draftFollowUp': response = { result: await draftFollowUp(call.args as any) }; break;
                      
-                     // Handlers for Audio/Video that trigger secondary API calls
                      case 'draftVoiceOver': {
                          const args = call.args as any;
                          const audioBase64 = await this.generateAudio(args.script);
@@ -454,7 +482,7 @@ export class CopilotService {
                              presentationContent: `# Voice Over\n\n- **Client**: ${args.companyName}\n- **Status**: Generated`,
                              audioContent: audioBase64 || undefined
                          });
-                         response = { artifact: `<artifact_payload>\n${artifactJson}\n</artifact_payload>` };
+                         response = { result: `<reasoning>\n- Generating TTS audio...\n</reasoning>\n<artifact_payload>\n${artifactJson}\n</artifact_payload>` };
                          break;
                      }
                      case 'createDemoVideo': {
@@ -466,7 +494,7 @@ export class CopilotService {
                              videoUri: videoUri || undefined,
                              videoPrompt: args.prompt
                          });
-                         response = { artifact: `<artifact_payload>\n${artifactJson}\n</artifact_payload>` };
+                         response = { result: `<reasoning>\n- Generating video with Veo...\n</reasoning>\n<artifact_payload>\n${artifactJson}\n</artifact_payload>` };
                          break;
                      }
                  }
@@ -498,25 +526,20 @@ export class CopilotService {
       const companyName = lead ? lead.companyName : "Client";
 
       let artifactResponse = "";
-      let actionTaken = "";
 
       if (lowerQuery.includes("proposal")) {
-          artifactResponse = await draftProposal({ companyName, instructions: query });
-          actionTaken = "drafting a proposal";
+          artifactResponse = await generateArtifactWithGemini('proposal', { companyName, industry: lead.industry, needs: lead.needs }, query);
       } else if (lowerQuery.includes("handoff")) {
-          artifactResponse = await draftHandoff({ companyName, targetTeam: "Implementation", instructions: query });
-          actionTaken = "creating a handoff";
+          artifactResponse = await generateArtifactWithGemini('handoff', { companyName, targetTeam: "Implementation" }, query);
       } else if (lowerQuery.includes("brief") || lowerQuery.includes("prep") || lowerQuery.includes("meeting")) {
-          artifactResponse = await prepareMeetingBrief({ companyName, instructions: query });
-          actionTaken = "preparing a meeting brief";
+          artifactResponse = await generateArtifactWithGemini('meeting_brief', { companyName }, query);
       } else if (lowerQuery.includes("email") || lowerQuery.includes("follow up")) {
-          artifactResponse = await draftFollowUp({ companyName, meetingContext: "recent discussion", instructions: query });
-          actionTaken = "drafting a follow-up email";
+          artifactResponse = await generateArtifactWithGemini('email', { companyName, meetingContext: "recent discussion" }, query);
       } else {
-           return "I'm currently having trouble connecting to my AI services. Please check your internet connection or API key configuration.";
+           return "I'm currently running in offline mode. I can still help you generate proposals, handoffs, and meeting briefs. Try saying '@Velocity draft proposal for Acme Corp'.";
       }
 
-      return `(AI Service Unavailable) I have generated a **sample** for you by ${actionTaken} for ${companyName}.\n\n${artifactResponse}`;
+      return `(Offline Mode) I have generated a **sample** for you.\n\n${artifactResponse}`;
   }
 }
 

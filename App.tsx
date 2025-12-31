@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import Navigation from './components/Navigation';
 import Dashboard from './components/Dashboard';
@@ -6,10 +7,11 @@ import ArtifactViewer from './components/ArtifactViewer';
 import Analytics from './components/Analytics';
 import HistoryView from './components/HistoryView';
 import CalendarView from './components/CalendarView';
+import RepositoryView from './components/RepositoryView';
+import CopilotPage from './components/CopilotPage';
 import { WorkspaceMode, Lead, ArtifactData, CalendarEvent } from './types';
-import { ChevronLeft, Layers } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { VelocityLogo } from './components/VelocityLogo';
-import { copilotService } from './services/geminiService';
 import { createArtifact } from './services/artifactService';
 import { getLeads } from './services/dataService';
 
@@ -82,6 +84,8 @@ const App: React.FC = () => {
 
   const renderCanvas = () => {
     switch (mode) {
+      case WorkspaceMode.COPILOT:
+        return <CopilotPage activeLead={selectedLead} />;
       case WorkspaceMode.DASHBOARD:
         return <Dashboard onSelectLead={handleSelectLead} onRunAction={handleRunAction} />;
       case WorkspaceMode.CALENDAR:
@@ -97,6 +101,8 @@ const App: React.FC = () => {
                 }}
             />
         );
+      case WorkspaceMode.REPOSITORY:
+        return <RepositoryView />;
       case WorkspaceMode.HISTORY:
         return <HistoryView />;
       default: 
@@ -108,7 +114,14 @@ const App: React.FC = () => {
     <div className="flex h-screen w-full bg-white overflow-hidden font-sans text-slate-900 relative">
       <Navigation 
         currentView={mode} 
-        onNavigate={(m) => { setMode(m); setActiveArtifactId(null); }} 
+        onNavigate={(m) => { 
+            setMode(m); 
+            setActiveArtifactId(null);
+            // If navigating to full screen copilot, close the side panel to avoid duplication
+            if (m === WorkspaceMode.COPILOT) {
+                setIsCopilotOpen(false);
+            }
+        }} 
         onToggleCopilot={() => setIsCopilotOpen(!isCopilotOpen)}
       />
 
@@ -126,7 +139,7 @@ const App: React.FC = () => {
          />
       </div>
 
-      {!isCopilotOpen && (
+      {!isCopilotOpen && mode !== WorkspaceMode.COPILOT && (
           <button 
             onClick={() => setIsCopilotOpen(true)}
             className="hidden md:flex fixed right-0 top-1/2 -translate-y-1/2 bg-black text-white p-2 rounded-l-lg shadow-lg hover:bg-gray-800 transition-all z-40 flex-col items-center gap-2 group"

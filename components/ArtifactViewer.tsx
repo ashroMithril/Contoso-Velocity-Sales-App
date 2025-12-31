@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Artifact, ArtifactData, DocumentComment } from '../types';
 import { getArtifacts, saveArtifact } from '../services/artifactService';
@@ -24,7 +25,9 @@ import {
     Mic,
     Video,
     Play,
-    Pause
+    Pause,
+    ShieldCheck,
+    CheckCircle
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
@@ -32,6 +35,15 @@ interface ArtifactViewerProps {
   initialArtifactId?: string | null;
   onBackToDashboard: () => void;
   onRefine: (selectedText: string, instruction: string) => Promise<string | null>;
+}
+
+interface ApproverSuggestion {
+    id: string;
+    name: string;
+    role: string;
+    avatar: string;
+    reason: string;
+    relevantSections: string[];
 }
 
 const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ initialArtifactId, onBackToDashboard, onRefine }) => {
@@ -54,12 +66,17 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ initialArtifactId, onBa
   const [comments, setComments] = useState<DocumentComment[]>([]);
   const [showCommentSidebar, setShowCommentSidebar] = useState(false);
 
-  // Sharing State
+  // Sharing & Approval State
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [shareToast, setShareToast] = useState<{show: boolean, msg: string}>({show: false, msg: ''});
   const [showEmailModal, setShowEmailModal] = useState(false);
   const [emailDraft, setEmailDraft] = useState('');
   const [isGeneratingEmail, setIsGeneratingEmail] = useState(false);
+  
+  // Approval Workflow State
+  const [showApprovalModal, setShowApprovalModal] = useState(false);
+  const [suggestedApprovers, setSuggestedApprovers] = useState<ApproverSuggestion[]>([]);
+  const [selectedApproverIds, setSelectedApproverIds] = useState<string[]>([]);
   
   // Audio Playback State
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -232,6 +249,76 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ initialArtifactId, onBa
           setCurrentArtifact(updated);
           saveArtifact(updated);
       }
+  };
+
+  // --- Approval Logic ---
+  const handleOpenApproval = () => {
+      const content = currentArtifact?.content.documentContent || '';
+      const suggestions: ApproverSuggestion[] = [];
+      
+      // Heuristic analysis for approvers
+      if (content.toLowerCase().includes('price') || content.includes('$') || content.toLowerCase().includes('investment')) {
+          suggestions.push({
+              id: 'fin-1',
+              name: 'Sarah Lee',
+              role: 'CFO',
+              avatar: 'SL',
+              reason: 'Discount threshold (> 10%) or pricing table detected.',
+              relevantSections: ['Investment', 'Pricing Summary']
+          });
+      }
+      
+      if (content.toLowerCase().includes('security') || content.toLowerCase().includes('compliance') || content.toLowerCase().includes('data')) {
+          suggestions.push({
+              id: 'tech-1',
+              name: 'John Doe',
+              role: 'VP Engineering',
+              avatar: 'JD',
+              reason: 'Contains security protocols or data handling clauses.',
+              relevantSections: ['Security Protocols', 'Data Privacy']
+          });
+      }
+
+      if (content.toLowerCase().includes('terms') || content.toLowerCase().includes('agreement') || content.toLowerCase().includes('liability')) {
+          suggestions.push({
+              id: 'legal-1',
+              name: 'David Kim',
+              role: 'General Counsel',
+              avatar: 'DK',
+              reason: 'Non-standard liability terms or legal agreements.',
+              relevantSections: ['Terms & Conditions']
+          });
+      }
+      
+      // Default Approver if none found or always include manager
+      if (suggestions.length === 0 || !suggestions.find(s => s.role === 'Sales Manager')) {
+           suggestions.unshift({
+              id: 'mgr-1',
+              name: 'Alice Johnson',
+              role: 'Sales Manager',
+              avatar: 'AJ',
+              reason: 'Standard proposal quality review.',
+              relevantSections: ['Full Document']
+          });
+      }
+
+      setSuggestedApprovers(suggestions);
+      setSelectedApproverIds(suggestions.map(s => s.id)); // Pre-select all
+      setShowApprovalModal(true);
+  };
+
+  const handleSendApproval = () => {
+      setShowApprovalModal(false);
+      
+      // Update artifact status
+      if (currentArtifact) {
+          const updated = {...currentArtifact, status: 'In Review' as const};
+          setCurrentArtifact(updated);
+          saveArtifact(updated);
+      }
+
+      setShareToast({show: true, msg: 'Approval requests sent successfully.'});
+      setTimeout(() => setShareToast({show: false, msg: ''}), 3000);
   };
 
   // --- Audio Playback Logic ---
@@ -423,6 +510,75 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ initialArtifactId, onBa
           </div>
       )}
 
+      {/* Approval Modal */}
+      {showApprovalModal && (
+          <div className="absolute inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col max-h-[90vh]">
+                  <div className="p-5 border-b border-gray-100 flex justify-between items-center">
+                      <div>
+                          <h3 className="font-bold text-lg text-gray-900">Request Approval</h3>
+                          <p className="text-xs text-gray-500 mt-0.5">Select stakeholders to review specific sections.</p>
+                      </div>
+                      <button onClick={() => setShowApprovalModal(false)} className="p-1 hover:bg-gray-100 rounded-full"><X className="w-5 h-5"/></button>
+                  </div>
+                  <div className="p-5 flex-1 overflow-y-auto space-y-4">
+                      {suggestedApprovers.map((approver) => {
+                          const isSelected = selectedApproverIds.includes(approver.id);
+                          return (
+                              <div 
+                                key={approver.id} 
+                                className={`border rounded-xl p-4 transition-all cursor-pointer ${isSelected ? 'border-indigo-600 bg-indigo-50/50 ring-1 ring-indigo-600' : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'}`}
+                                onClick={() => {
+                                    if(isSelected) setSelectedApproverIds(prev => prev.filter(id => id !== approver.id));
+                                    else setSelectedApproverIds(prev => [...prev, approver.id]);
+                                }}
+                              >
+                                  <div className="flex items-start justify-between">
+                                      <div className="flex items-center gap-3">
+                                          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold text-gray-700 border border-white shadow-sm">
+                                              {approver.avatar}
+                                          </div>
+                                          <div>
+                                              <div className="font-bold text-sm text-gray-900">{approver.name}</div>
+                                              <div className="text-xs text-gray-500">{approver.role}</div>
+                                          </div>
+                                      </div>
+                                      <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 bg-white'}`}>
+                                          {isSelected && <Check className="w-3 h-3 text-white" />}
+                                      </div>
+                                  </div>
+                                  <div className="mt-3 pt-3 border-t border-gray-200/50">
+                                      <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 mb-1">
+                                          <Sparkles className="w-3 h-3 text-indigo-500" />
+                                          Suggested Reason
+                                      </div>
+                                      <p className="text-xs text-gray-600 leading-relaxed">{approver.reason}</p>
+                                      <div className="mt-2 flex flex-wrap gap-1.5">
+                                          {approver.relevantSections.map((sec, i) => (
+                                              <span key={i} className="px-2 py-0.5 bg-white border border-gray-200 rounded-md text-[10px] text-gray-500 font-medium">
+                                                  {sec}
+                                              </span>
+                                          ))}
+                                      </div>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                  </div>
+                  <div className="p-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl flex justify-end gap-3">
+                      <button onClick={() => setShowApprovalModal(false)} className="px-4 py-2 text-sm font-semibold text-gray-600 hover:text-gray-800">Cancel</button>
+                      <button 
+                        onClick={handleSendApproval} 
+                        disabled={selectedApproverIds.length === 0}
+                        className="px-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 shadow-md flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                          <Send className="w-4 h-4" /> Send Request ({selectedApproverIds.length})
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* Refine Overlay */}
       {isRefining && (
           <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-sm flex items-center justify-center">
@@ -506,7 +662,7 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ initialArtifactId, onBa
              
              {/* Share Button Dropdown */}
              <div className="relative">
-                 <button onClick={() => setShowShareMenu(!showShareMenu)} className={`px-4 py-2 bg-black text-white rounded-lg text-xs font-bold hover:bg-gray-800 shadow-sm flex items-center gap-2 ${showShareMenu ? 'ring-2 ring-offset-1 ring-black' : ''}`}>
+                 <button onClick={() => setShowShareMenu(!showShareMenu)} className={`px-4 py-2 bg-white text-gray-700 hover:text-black border border-gray-200 hover:bg-gray-50 rounded-lg text-xs font-bold shadow-sm flex items-center gap-2 ${showShareMenu ? 'ring-2 ring-offset-1 ring-black' : ''}`}>
                      <Share2 className="w-3.5 h-3.5" /> Share
                  </button>
                  {showShareMenu && (
@@ -521,6 +677,14 @@ const ArtifactViewer: React.FC<ArtifactViewerProps> = ({ initialArtifactId, onBa
                  )}
                  {showShareMenu && <div className="fixed inset-0 z-20" onClick={() => setShowShareMenu(false)} />}
              </div>
+
+             {/* Request Approval Button - Separated and Distinct */}
+             <button 
+                onClick={handleOpenApproval} 
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 shadow-md flex items-center gap-2 transition-all active:scale-95 ml-2"
+             >
+                <ShieldCheck className="w-3.5 h-3.5" /> Request Approval
+             </button>
         </div>
       </div>
 

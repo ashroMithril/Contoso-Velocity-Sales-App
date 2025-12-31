@@ -1,9 +1,10 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Message, Lead, ArtifactData } from '../types';
 import { copilotService } from '../services/geminiService';
 import { saveSession } from '../services/historyService';
 import { VelocityLogo } from './VelocityLogo';
-import { Send, Loader2, X, Search, FileText, Calendar, ArrowRight, Layers, Mail, Briefcase, Share2, Users, Check, Mic, Video, StopCircle } from 'lucide-react';
+import { Send, Loader2, X, Search, FileText, Calendar, ArrowRight, Layers, Mail, Briefcase, Share2, Users, Check, Mic, Video, StopCircle, Sparkles, ShieldCheck } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
 interface CopilotPanelProps {
@@ -23,6 +24,58 @@ const QUICK_ACTIONS = [
     { label: "Research", icon: Search, prompt: "Research recent news for this account" },
 ];
 
+// --- THINKING PROCESS COMPONENT ---
+interface ThinkingStep {
+    id: string;
+    label: string;
+    status: 'pending' | 'active' | 'complete';
+}
+
+const ThinkingProcess: React.FC<{ steps: ThinkingStep[] }> = ({ steps }) => {
+    return (
+        <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-3 transition-all duration-300 animate-in fade-in slide-in-from-bottom-2">
+            <div className="flex items-center gap-2 mb-3">
+                <div className="relative w-4 h-4">
+                     <div className="absolute inset-0 bg-indigo-500 rounded-full animate-ping opacity-20"></div>
+                     <div className="relative w-4 h-4 bg-indigo-600 rounded-full flex items-center justify-center">
+                        <Loader2 className="w-2.5 h-2.5 text-white animate-spin" />
+                     </div>
+                </div>
+                <span className="text-xs font-bold text-indigo-900 uppercase tracking-wide">Velocity Agent Reasoning</span>
+            </div>
+            <div className="space-y-2.5 pl-1.5">
+                {steps.map((step, idx) => (
+                    <div key={step.id} className="flex items-center gap-3 animate-in fade-in slide-in-from-left-2 duration-300 fill-mode-forwards" style={{animationDelay: `${idx * 150}ms`}}>
+                        <div className="relative flex flex-col items-center">
+                            {/* Connector Line */}
+                            {idx !== steps.length - 1 && (
+                                <div className={`absolute top-4 w-px h-6 bg-gray-200 ${step.status === 'complete' ? 'bg-indigo-200' : ''}`} />
+                            )}
+                            
+                            {step.status === 'complete' ? (
+                                <div className="w-4 h-4 rounded-full bg-green-100 text-green-600 flex items-center justify-center border border-green-200">
+                                    <Check className="w-2.5 h-2.5" />
+                                </div>
+                            ) : step.status === 'active' ? (
+                                <div className="w-4 h-4 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin"></div>
+                            ) : (
+                                <div className="w-4 h-4 rounded-full border-2 border-gray-200"></div>
+                            )}
+                        </div>
+                        <span className={`text-xs transition-colors duration-300 ${
+                            step.status === 'active' ? 'text-indigo-700 font-semibold' : 
+                            step.status === 'complete' ? 'text-gray-500 line-through opacity-70' : 'text-gray-400'
+                        }`}>
+                            {step.label}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+
 const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGenerated, externalPrompt, onPromptHandled, onClose }) => {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -35,9 +88,13 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
+  // Thinking State
+  const [currentThinkingSteps, setCurrentThinkingSteps] = useState<ThinkingStep[]>([]);
+  
   // Voice Input State
   const [isListening, setIsListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const isMounted = useRef(true);
 
   // Sharing State
   const [shareMenuOpenId, setShareMenuOpenId] = useState<string | null>(null);
@@ -49,8 +106,13 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+      isMounted.current = true;
+      return () => { isMounted.current = false; };
+  }, []);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, currentThinkingSteps]); 
 
   useEffect(() => {
     if (externalPrompt) {
@@ -87,8 +149,6 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
                     }
                 }
                 
-                // We append to input if needed, or just replace. Here we replace for clarity during dictation,
-                // but a more complex app might append.
                 if (finalTranscript) {
                     setInput(prev => {
                         const trailingSpace = prev.length > 0 && !prev.endsWith(' ') ? ' ' : '';
@@ -99,11 +159,11 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
 
             recognitionRef.current.onerror = (event: any) => {
                 console.error("Speech recognition error", event.error);
-                setIsListening(false);
+                if (isMounted.current) setIsListening(false);
             };
 
             recognitionRef.current.onend = () => {
-                setIsListening(false);
+                if (isMounted.current) setIsListening(false);
             };
         }
     }
@@ -136,6 +196,7 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsLoading(true);
+    setCurrentThinkingSteps([]); // Reset steps
 
     try {
       const history = messages
@@ -147,49 +208,102 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
       
       const responseText = await copilotService.sendMessage(history, text);
       
+      if (!isMounted.current) return;
+
+      // PARSING LOGIC: Extract <reasoning> and <artifact_payload>
       let finalMessage = responseText;
       let generatedArtifact: ArtifactData | undefined = undefined;
+      let reasoningSteps: string[] = [];
 
+      // 1. Extract Reasoning
+      const reasoningRegex = /<reasoning>([\s\S]*?)<\/reasoning>/;
+      const reasoningMatch = responseText.match(reasoningRegex);
+      if (reasoningMatch && reasoningMatch[1]) {
+          const rawReasoning = reasoningMatch[1].trim();
+          // Split by bullets or newlines and clean up
+          reasoningSteps = rawReasoning.split('\n')
+              .map(line => line.replace(/^-\s*/, '').trim())
+              .filter(line => line.length > 0);
+          
+          finalMessage = finalMessage.replace(reasoningRegex, '');
+      }
+
+      // 2. Extract Artifact
       const artifactRegex = /<artifact_payload>([\s\S]*?)<\/artifact_payload>/;
-      const match = responseText.match(artifactRegex);
+      const artifactMatch = finalMessage.match(artifactRegex);
 
-      if (match && match[1]) {
+      if (artifactMatch && artifactMatch[1]) {
           try {
-              const jsonContent = JSON.parse(match[1].trim());
+              const jsonContent = JSON.parse(artifactMatch[1].trim());
               generatedArtifact = jsonContent;
               
-              // Infer Type logic for the artifact preview
               const artifactType = 
                 generatedArtifact.audioContent ? 'VoiceOver' :
                 generatedArtifact.videoUri ? 'DemoVideo' : 'Generic';
               
-              finalMessage = responseText.replace(artifactRegex, '').trim();
-              if (!finalMessage) finalMessage = `I've generated the ${artifactType} asset.`;
+              finalMessage = finalMessage.replace(artifactRegex, '').trim();
+              if (!finalMessage) finalMessage = `I've generated the ${artifactType} asset based on my analysis.`;
           } catch (e) {
               console.error("Failed to parse artifact JSON", e);
+          }
+      }
+
+      // 3. Animate Reasoning Steps (Simulate Timing)
+      if (reasoningSteps.length > 0) {
+          const steps: ThinkingStep[] = reasoningSteps.map((label, i) => ({
+              id: `step-${i}`,
+              label,
+              status: 'pending'
+          }));
+          
+          setCurrentThinkingSteps(steps);
+
+          // Animate them rapidly to show the thought process before showing final result
+          for (let i = 0; i < steps.length; i++) {
+              if (!isMounted.current) break;
+              setCurrentThinkingSteps(prev => prev.map((s, idx) => {
+                  if (idx === i) return { ...s, status: 'active' };
+                  if (idx < i) return { ...s, status: 'complete' };
+                  return s;
+              }));
+              await new Promise(r => setTimeout(r, 400)); // 400ms per step
+          }
+          if (isMounted.current) {
+               setCurrentThinkingSteps(prev => prev.map(s => ({ ...s, status: 'complete' })));
           }
       }
 
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'model',
-        text: finalMessage,
+        text: finalMessage.trim(),
         timestamp: new Date(),
-        relatedArtifact: generatedArtifact
+        relatedArtifact: generatedArtifact,
+        reasoning: reasoningSteps
       };
       
-      setMessages(prev => [...prev, botMsg]);
+      // Delay slightly to let the last thinking step finish visually
+      setTimeout(() => {
+          if(isMounted.current) {
+              setMessages(prev => [...prev, botMsg]);
+              setCurrentThinkingSteps([]); // Clear the floating thinking steps as they are now persisted in the message history if we wanted, or just done.
+          }
+      }, 500);
 
     } catch (error) {
        console.error(error);
-       setMessages(prev => [...prev, {
-           id: Date.now().toString(),
-           role: 'model',
-           text: "Connection error. Please try again.",
-           timestamp: new Date()
-       }]);
+       if (isMounted.current) {
+           setMessages(prev => [...prev, {
+               id: Date.now().toString(),
+               role: 'model',
+               text: "Connection error. Please try again.",
+               timestamp: new Date()
+           }]);
+       }
     } finally {
-      setIsLoading(false);
+      if (isMounted.current) {
+          setIsLoading(false);
+      }
     }
   };
 
@@ -198,7 +312,6 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
       if (activeLead && actionPrompt.includes("active account")) {
           prompt = actionPrompt.replace("active account", activeLead.companyName);
       } else if (!activeLead && actionPrompt.includes("active account")) {
-          // Fallback if no lead selected
           prompt = actionPrompt.replace("active account", "Client");
       }
       handleSend(prompt);
@@ -217,7 +330,6 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
       setShowEmailModal(true);
       setIsGeneratingEmail(true);
       
-      // Create mock artifact for service
       const mockArtifact: any = {
           title: 'Generated Assets',
           companyName: activeLead?.companyName || 'Client',
@@ -226,8 +338,10 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
       };
 
       const draft = await copilotService.generateEmailForArtifact(mockArtifact);
-      setEmailDraft(draft);
-      setIsGeneratingEmail(false);
+      if (isMounted.current) {
+          setEmailDraft(draft);
+          setIsGeneratingEmail(false);
+      }
   };
 
   const handleSendEmail = () => {
@@ -236,12 +350,19 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
       setTimeout(() => setShareToast({show: false, msg: ''}), 3000);
   };
 
+  const handleRequestApproval = () => {
+      // For quick action in the panel, we just show a success toast.
+      // In the full viewer, this opens a modal.
+      setShareToast({show: true, msg: 'Approval request sent to manager.'});
+      setTimeout(() => setShareToast({show: false, msg: ''}), 3000);
+  };
+
   return (
     <div className="flex flex-col h-full bg-white font-sans border-l border-gray-200 shadow-2xl relative">
         
         {/* Toast */}
         {shareToast.show && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[60] bg-gray-900 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm animate-in fade-in slide-in-from-top-4">
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-[60] bg-gray-900 text-white px-4 py-2 rounded-full shadow-lg flex items-center gap-2 text-sm transition-all duration-300 transform translate-y-0 opacity-100">
                 <Check className="w-4 h-4 text-green-400" /> {shareToast.msg}
             </div>
         )}
@@ -316,20 +437,39 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
                         <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center mt-1 shadow-sm ${msg.role === 'user' ? 'bg-black text-white' : 'bg-white text-indigo-600 border border-indigo-100'}`}>
                             {msg.role === 'user' ? <span className="text-[10px] font-bold">ME</span> : <VelocityLogo className="w-5 h-5" />}
                         </div>
-                        <div className={`text-sm leading-relaxed p-3 md:p-4 rounded-2xl shadow-sm ${
-                            msg.role === 'user' 
-                            ? 'bg-black text-white rounded-tr-none' 
-                            : 'bg-white border border-gray-200 text-gray-800 rounded-tl-none'
-                        }`}>
-                            <ReactMarkdown className="prose prose-sm max-w-none prose-p:my-0 prose-ul:my-1 prose-headings:text-inherit prose-strong:text-inherit prose-a:text-inherit">
-                                {msg.text}
-                            </ReactMarkdown>
+                        <div className={`flex flex-col gap-2 w-full`}>
+                            {/* Reasoning Bubble (If exists) */}
+                            {msg.reasoning && msg.reasoning.length > 0 && (
+                                <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm mb-1">
+                                    <div className="flex items-center gap-2 mb-2 text-indigo-600">
+                                        <Sparkles className="w-3 h-3" />
+                                        <span className="text-[10px] font-bold uppercase">Reasoning Process</span>
+                                    </div>
+                                    <ul className="list-none space-y-1">
+                                        {msg.reasoning.map((step, idx) => (
+                                            <li key={idx} className="text-xs text-gray-600 flex items-start gap-2">
+                                                <span className="text-gray-300 mt-0.5">•</span> {step}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+
+                            <div className={`text-sm leading-relaxed p-3 md:p-4 rounded-2xl shadow-sm ${
+                                msg.role === 'user' 
+                                ? 'bg-black text-white rounded-tr-none' 
+                                : 'bg-white border border-gray-200 text-gray-800 rounded-tl-none'
+                            }`}>
+                                <ReactMarkdown className="prose prose-sm max-w-none prose-p:my-0 prose-ul:my-1 prose-headings:text-inherit prose-strong:text-inherit prose-a:text-inherit">
+                                    {msg.text}
+                                </ReactMarkdown>
+                            </div>
                         </div>
                     </div>
 
                     {/* Artifact Link Card */}
                     {msg.relatedArtifact && (
-                        <div className="ml-11 max-w-[85%] animate-in zoom-in-95 duration-300 w-full md:w-auto">
+                        <div className="ml-11 max-w-[85%] w-full md:w-auto transition-all duration-300">
                             <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden ring-1 ring-black/5 flex flex-col">
                                 <div 
                                     onClick={() => onArtifactGenerated(msg.relatedArtifact!)}
@@ -365,10 +505,17 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
                                     >
                                         <Share2 className="w-3.5 h-3.5" /> Share
                                     </button>
+                                    <div className="h-4 w-px bg-gray-200"></div>
+                                    <button 
+                                        onClick={handleRequestApproval}
+                                        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 px-2 py-1 rounded-md hover:bg-white border border-transparent hover:border-indigo-100 transition-all"
+                                    >
+                                        <ShieldCheck className="w-3.5 h-3.5" /> Approval
+                                    </button>
 
                                     {/* Inline Share Menu */}
                                     {shareMenuOpenId === msg.id && (
-                                        <div className="absolute right-2 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-10 w-40 p-1 animate-in fade-in zoom-in-95 duration-100 origin-top-right">
+                                        <div className="absolute right-2 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl z-10 w-40 p-1 transition-all origin-top-right">
                                             <button 
                                                 onClick={handleShareColleague}
                                                 className="w-full text-left px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 rounded-md flex items-center gap-2"
@@ -384,14 +531,24 @@ const CopilotPanel: React.FC<CopilotPanelProps> = ({ activeLead, onArtifactGener
                 </div>
             ))}
             
-            {isLoading && (
-                 <div className="flex gap-3 ml-1">
-                    <div className="w-8 h-8 bg-white border border-gray-200 rounded-full flex items-center justify-center mt-1 shadow-sm">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+            {/* Thinking UI - Shown while Loading OR while steps are animating */}
+            {(isLoading || currentThinkingSteps.length > 0) && (
+                <div className="flex flex-col items-start gap-2 ml-1 max-w-[85%]">
+                     <div className="w-8 h-8 bg-white border border-gray-200 rounded-full flex items-center justify-center shadow-sm">
+                        <VelocityLogo className="w-5 h-5" />
                     </div>
-                    <div className="text-xs text-gray-400 py-2 font-medium tracking-wide animate-pulse">Thinking...</div>
-                 </div>
+                    {/* If we have specific steps (from response), show them. Otherwise show placeholder/connecting state */}
+                    {currentThinkingSteps.length > 0 ? (
+                        <ThinkingProcess steps={currentThinkingSteps} />
+                    ) : (
+                        <div className="bg-white border border-gray-200 rounded-xl p-3 shadow-sm flex items-center gap-3">
+                            <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                            <span className="text-xs font-medium text-gray-600">Agents collaborating...</span>
+                        </div>
+                    )}
+                </div>
             )}
+            
             <div ref={messagesEndRef} />
         </div>
 

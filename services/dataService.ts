@@ -1,5 +1,5 @@
 
-import { Lead, CalendarEvent } from '../types';
+import { Lead, CalendarEvent, PricingItem } from '../types';
 
 // ---------------------------------------------------------------------------
 // 1. CRM DATA (Simulating a CSV Export)
@@ -171,7 +171,32 @@ export const NEWS_REPOSITORY: Record<string, string[]> = {
 };
 
 // ---------------------------------------------------------------------------
-// 3. CALENDAR EVENTS GENERATOR
+// 3. EMAIL HISTORY (Context for "Reasoning")
+// ---------------------------------------------------------------------------
+export const MOCK_EMAIL_THREADS: Record<string, { sender: string, subject: string, snippet: string, date: string }[]> = {
+    "Acme Corp": [
+        { sender: "Alice Smith", subject: "Re: Cloud Migration Timeline", snippet: "We are worried about downtime during the transition. Can you guarantee < 4 hours?", date: "2024-05-10" },
+        { sender: "John Doe (VP Eng)", subject: "Security Requirements", snippet: "We need SOC2 compliance documentation before we proceed.", date: "2024-05-12" }
+    ],
+    "Northwind Traders": [
+        { sender: "Maria Anders", subject: "Pricing Question", snippet: "The competitors are offering a 15% discount for a 3-year term. Can you match?", date: "2024-05-11" }
+    ]
+};
+
+// ---------------------------------------------------------------------------
+// 4. ORG CHANGES (Context for "Reasoning")
+// ---------------------------------------------------------------------------
+export const MOCK_ORG_CHANGES: Record<string, { role: string, newName: string, notes: string }[]> = {
+    "Acme Corp": [
+        { role: "VP of Engineering", newName: "John Doe", notes: "Recently joined from a competitor. Very security-focused." }
+    ],
+    "TechStart Inc": [
+        { role: "CFO", newName: "Sarah Lee", notes: "Promoted internally. Strict on budget approval cycles." }
+    ]
+};
+
+// ---------------------------------------------------------------------------
+// 5. CALENDAR EVENTS GENERATOR
 // ---------------------------------------------------------------------------
 
 const EVENT_TEMPLATES = [
@@ -256,6 +281,36 @@ export const getCalendarEvents = (): CalendarEvent[] => {
     return events.sort((a, b) => a.date.getTime() - b.date.getTime());
 };
 
+// ---------------------------------------------------------------------------
+// 6. KNOWLEDGE BASE / REPOSITORY DATA
+// ---------------------------------------------------------------------------
+
+export const CONTOSO_PRODUCTS = [
+    { sku: "CLD-ENT-001", name: "Contoso Cloud Enterprise", category: "Cloud Infrastructure", price: 12000, desc: "Full-stack cloud hosting with unlimited compute credits and 24/7 priority support." },
+    { sku: "SEC-PRO-X", name: "Sentinel Security Suite", category: "Cybersecurity", price: 5000, desc: "Advanced threat detection, firewall management, and real-time monitoring dashboard." },
+    { sku: "AI-CO-PILOT", name: "Velocity Sales Agent", category: "AI & Automation", price: 2500, desc: "GenAI-powered sales assistant for proposal generation and lead scoring." },
+    { sku: "DAT-LAKE-V2", name: "Data Lake Storage", category: "Data Management", price: 3500, desc: "Petabyte-scale unstructured data storage with low-latency retrieval." },
+    { sku: "IOT-HUB-CNCT", name: "IoT Connectivity Hub", category: "IoT", price: 8000, desc: "Centralized management platform for up to 10,000 edge devices." },
+    { sku: "CON-SUP-SLA", name: "Platinum Support SLA", category: "Services", price: 2000, desc: "Guaranteed 15-minute response time and dedicated technical account manager." }
+];
+
+export const SALES_ASSETS = [
+    { id: "a1", title: "Global Bank_MSA_Final.pdf", type: "Contract", date: "2024-02-15", owner: "Legal Team" },
+    { id: "a2", title: "Q3_2024_Pricing_Guide_v2.pdf", type: "Pricing", date: "2024-03-01", owner: "Sales Ops" },
+    { id: "a3", title: "Acme_Corp_Proposal_Rejected.docx", type: "Proposal", date: "2023-11-10", owner: "Alice Smith" },
+    { id: "a4", title: "Standard_NDA_Template.docx", type: "Legal", date: "2024-01-01", owner: "Legal Team" },
+    { id: "a5", title: "Northwind_Renewal_Pitch_Deck.pptx", type: "Presentation", date: "2024-02-28", owner: "Maria Anders" },
+    { id: "a6", title: "Competitor_Battlecard_AWS.pdf", type: "Battlecard", date: "2024-03-05", owner: "Product Marketing" }
+];
+
+export const TEAM_ACTIVITY = [
+    { id: "t1", user: "Sarah C.", action: "generated a proposal", target: "MediCare Plus", time: "10 mins ago", avatar: "SC" },
+    { id: "t2", user: "David S.", action: "created a demo video", target: "Litware Inc", time: "1 hour ago", avatar: "DS" },
+    { id: "t3", user: "Bob J.", action: "updated pricing", target: "Global Bank Deal", time: "3 hours ago", avatar: "BJ" },
+    { id: "t4", user: "System", action: "flagged renewal risk", target: "Fabrikam Residences", time: "5 hours ago", avatar: "SYS" },
+    { id: "t5", user: "Alice S.", action: "shared a handoff doc", target: "Acme Corp", time: "Yesterday", avatar: "AS" }
+];
+
 // Accessors
 export const getLeads = () => CRM_CSV_DATA;
 
@@ -264,3 +319,17 @@ export const getNewsForCompany = (companyName: string) => {
     const key = Object.keys(NEWS_REPOSITORY).find(k => k.toLowerCase().includes(companyName.toLowerCase()));
     return key ? NEWS_REPOSITORY[key] : ["No recent news found for this company."];
 };
+
+export const getEmailHistory = (companyName: string) => {
+    const key = Object.keys(MOCK_EMAIL_THREADS).find(k => k.toLowerCase().includes(companyName.toLowerCase()));
+    return key ? MOCK_EMAIL_THREADS[key] : [];
+};
+
+export const getOrgChanges = (companyName: string) => {
+    const key = Object.keys(MOCK_ORG_CHANGES).find(k => k.toLowerCase().includes(companyName.toLowerCase()));
+    return key ? MOCK_ORG_CHANGES[key] : [];
+};
+
+export const getProducts = () => CONTOSO_PRODUCTS;
+export const getAssets = () => SALES_ASSETS;
+export const getTeamActivity = () => TEAM_ACTIVITY;

@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { LayoutGrid, BarChart2, History, Settings, Layers, Calendar } from 'lucide-react';
+import { LayoutGrid, BarChart2, History, Settings, Layers, Calendar, Database } from 'lucide-react';
 import { VelocityLogo } from './VelocityLogo';
 import { WorkspaceMode } from '../types';
 
@@ -35,12 +36,15 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onNavigate, onTogg
         <div className="hidden md:flex w-[88px] bg-white border-r border-gray-200 flex-col items-center py-6 z-20 shrink-0 h-full shadow-[5px_0_20px_rgba(0,0,0,0.01)]">
             <div className="mb-10">
                 <button 
-                    onClick={onToggleCopilot}
-                    className="w-11 h-11 bg-indigo-600 rounded-xl grid place-items-center shadow-lg hover:shadow-indigo-500/30 transition-all cursor-pointer hover:scale-105 active:scale-95 group relative"
-                    title="Toggle Copilot"
+                    onClick={() => onNavigate(WorkspaceMode.COPILOT)}
+                    className={`w-11 h-11 rounded-xl grid place-items-center shadow-lg transition-all cursor-pointer hover:scale-105 active:scale-95 group relative ${
+                        currentView === WorkspaceMode.COPILOT 
+                        ? 'bg-black text-white ring-2 ring-black ring-offset-2' 
+                        : 'bg-indigo-600 text-white hover:shadow-indigo-500/30'
+                    }`}
+                    title="Open Full Screen Copilot"
                 >
-                    <VelocityLogo className="w-6 h-6 text-white" />
-                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
+                    <VelocityLogo className="w-6 h-6" />
                 </button>
             </div>
 
@@ -48,6 +52,7 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onNavigate, onTogg
                 <NavItem mode={WorkspaceMode.DASHBOARD} icon={LayoutGrid} label="Workspace" />
                 <NavItem mode={WorkspaceMode.CALENDAR} icon={Calendar} label="Calendar" />
                 <NavItem mode={WorkspaceMode.ARTIFACTS} icon={Layers} label="Artifacts" />
+                <NavItem mode={WorkspaceMode.REPOSITORY} icon={Database} label="Knowledge Base" />
                 <NavItem mode={WorkspaceMode.HISTORY} icon={History} label="History" />
                 <button className="p-3 rounded-xl mb-4 text-gray-400 hover:bg-gray-100 hover:text-black transition-all flex justify-center w-11 h-11 items-center hover:shadow-sm">
                     <BarChart2 className="w-5 h-5" strokeWidth={2} />
@@ -69,7 +74,7 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onNavigate, onTogg
              <NavItem mode={WorkspaceMode.DASHBOARD} icon={LayoutGrid} label="Home" />
              <NavItem mode={WorkspaceMode.CALENDAR} icon={Calendar} label="Calendar" />
              
-             {/* Mobile Copilot Trigger */}
+             {/* Mobile Copilot Trigger - Keeps toggle functionality for overlay on mobile */}
              <button 
                 onClick={onToggleCopilot}
                 className="w-12 h-12 bg-black rounded-full grid place-items-center shadow-lg text-white -mt-8 border-4 border-white"
@@ -78,9 +83,7 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, onNavigate, onTogg
             </button>
 
              <NavItem mode={WorkspaceMode.ARTIFACTS} icon={Layers} label="Artifacts" />
-             <button className="p-3 text-gray-400">
-                <Settings className="w-6 h-6" />
-             </button>
+             <NavItem mode={WorkspaceMode.REPOSITORY} icon={Database} label="KB" />
         </div>
     </>
   );
